@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kickhero"
-version = "0.2.0"
+version = "0.3.0"
 description = "Turn songs into drum lessons and practise them on any electronic drum kit."
 readme = "README.md"
 license = "MIT"

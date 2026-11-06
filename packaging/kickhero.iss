@@ -1,8 +1,8 @@
 ; Inno Setup script for Kickhero. Built by packaging\build.py:
-;   ISCC.exe /DAppVersion=0.2.0 packaging\kickhero.iss
+;   ISCC.exe /DAppVersion=0.3.0 packaging\kickhero.iss
 
 #ifndef AppVersion
-  #define AppVersion "0.2.0"
+  #define AppVersion "0.3.0"
 #endif
 
 [Setup]
