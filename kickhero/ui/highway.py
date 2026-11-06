@@ -11,7 +11,8 @@ from ..lanes import LANE_COLORS, LANE_NAMES, LANES
 from . import theme
 
 STRIP_H = 38        # bar/progress strip at the top
-LABEL_W = 132       # lane names on the left
+LABEL_W = 156       # lane names (and mute buttons) on the left
+MUTE_W = 22         # speaker button at the right end of each lane label
 HIT_FRAC = 0.16     # hit line position, fraction of the scrolling area
 BEATS_AHEAD = 6     # how far ahead you can read
 FLASH_S = 0.18
@@ -28,6 +29,7 @@ class Highway(QWidget):
     loop_selected = Signal(int, int)    # first bar, last bar (exclusive), 0-based
     loop_cleared = Signal()
     lane_toggled = Signal(str)
+    lane_muted = Signal(str)            # speaker button: silence/unsilence that drum's playback
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -37,6 +39,7 @@ class Highway(QWidget):
         self.lesson = None
         self.lanes = list(LANES)       # lanes drawn
         self.active_lanes = set(LANES)  # lanes being practised (others drawn as outlines)
+        self.muted = set()              # lanes whose playback is silenced (speaker button)
         self.flashes = {}       # lane -> (perf, color)
         self.popups = {}        # lane -> (text, color, perf): timing feedback next to the hit target
         self.combo = 0
@@ -64,11 +67,20 @@ class Highway(QWidget):
 
     def _lane_rect(self, idx):
         top = STRIP_H + 8
+        bottom = 8 + (24 if self._has_legend() else 0)
         cap = 110.0 if len(self.lanes) <= 3 else 78.0  # few lanes (early lessons): make them bigger
-        lane_h = min(cap, (self.height() - top - 8) / max(1, len(self.lanes)))
+        lane_h = min(cap, (self.height() - top - bottom) / max(1, len(self.lanes)))
         total = lane_h * len(self.lanes)
-        top += max(0.0, (self.height() - top - 8 - total) / 2)
+        top += max(0.0, (self.height() - top - bottom - total) / 2)
         return QRectF(0, top + idx * lane_h, self.width(), lane_h)
+
+    def _has_legend(self):
+        """Accents, ghost notes or open hi-hats get a legend under the lanes."""
+        return bool(self.lesson and (self.lesson.has_dynamics or self.lesson.has_open_hats))
+
+    def _mute_rect(self, idx):
+        r = self._lane_rect(idx)
+        return QRectF(LABEL_W - MUTE_W - 6, r.center().y() - MUTE_W / 2, MUTE_W, MUTE_W)
 
     def _hit_x(self):
         return LABEL_W + HIT_FRAC * (self.width() - LABEL_W)
@@ -92,7 +104,9 @@ class Highway(QWidget):
             return
         if p.x() < LABEL_W:
             for i, lane in enumerate(self.lanes):
-                if self._lane_rect(i).contains(p):
+                if self._mute_rect(i).adjusted(-4, -4, 4, 4).contains(p):
+                    self.lane_muted.emit(lane)
+                elif self._lane_rect(i).contains(p):
                     self.lane_toggled.emit(lane)
 
     def mouseMoveEvent(self, e):
@@ -101,6 +115,14 @@ class Highway(QWidget):
             self.update()
         p = e.position()
         self.setCursor(Qt.PointingHandCursor if p.y() < STRIP_H or p.x() < LABEL_W else Qt.ArrowCursor)
+        tip = ""
+        if p.x() < LABEL_W:
+            for i, lane in enumerate(self.lanes):
+                if self._mute_rect(i).adjusted(-4, -4, 4, 4).contains(p):
+                    tip = f"{'Unmute' if lane in self.muted else 'Mute'} the {LANE_NAMES[lane].lower()} playback"
+                elif self._lane_rect(i).contains(p):
+                    tip = f"Turn the {LANE_NAMES[lane].lower()} {'on' if lane not in self.active_lanes else 'off'}"
+        self.setToolTip(tip)
 
     def mouseReleaseEvent(self, e):
         if self._drag_from is not None:
@@ -136,6 +158,7 @@ class Highway(QWidget):
             self._paint_grid(p, s, u_now)
             self._paint_notes(p, s, u_now)
         self._paint_hit_line(p, now)
+        self._paint_legend(p)
         self._paint_popups(p, now)
         self._paint_overlay_text(p, s, u_now)
         p.end()
@@ -193,9 +216,29 @@ class Highway(QWidget):
             p.setPen(qc(theme.TEXT if active else theme.MUTED))
             p.setFont(QFont("Segoe UI", 10, QFont.DemiBold if active else QFont.Normal))
             name = LANE_NAMES[lane] + ("" if active else "  (off)")
-            p.drawText(QRectF(32, r.top(), LABEL_W - 36, r.height()), Qt.AlignVCenter | Qt.AlignLeft, name)
+            p.drawText(QRectF(32, r.top(), LABEL_W - MUTE_W - 42, r.height()), Qt.AlignVCenter | Qt.AlignLeft, name)
+            self._speaker(p, self._mute_rect(i), lane in self.muted)
         p.setPen(QPen(qc(theme.BORDER), 1))
         p.drawLine(QPointF(LABEL_W, STRIP_H), QPointF(LABEL_W, self.height()))
+
+    def _speaker(self, p, rect, muted):
+        """Speaker icon; crossed out (and red) when the lane's playback is muted."""
+        color = qc(theme.BAD) if muted else qc(theme.MUTED)
+        p.setPen(Qt.NoPen)
+        p.setBrush(color)
+        x, cy, s = rect.left() + 3, rect.center().y(), rect.height() / 22
+        p.drawRect(QRectF(x, cy - 3 * s, 4 * s, 6 * s))
+        p.drawPolygon([QPointF(x + 3 * s, cy - 3 * s), QPointF(x + 9 * s, cy - 8 * s),
+                       QPointF(x + 9 * s, cy + 8 * s), QPointF(x + 3 * s, cy + 3 * s)])
+        p.setBrush(Qt.NoBrush)
+        p.setPen(QPen(color, 1.8))
+        if muted:
+            p.drawLine(QPointF(x + 12 * s, cy - 4 * s), QPointF(x + 19 * s, cy + 4 * s))
+            p.drawLine(QPointF(x + 12 * s, cy + 4 * s), QPointF(x + 19 * s, cy - 4 * s))
+        else:
+            for k in (1, 2):
+                rad = 4 * k * s
+                p.drawArc(QRectF(x + 8 * s - rad, cy - rad, 2 * rad, 2 * rad), -50 * 16, 100 * 16)
 
     def _x_of(self, u, u_now):
         return self._hit_x() + (u - u_now) / self.lesson.beat * self._px_per_beat()
@@ -230,19 +273,23 @@ class Highway(QWidget):
                     p.drawLine(QPointF(x, top), QPointF(x, bottom))
                 k += 1
 
+    # note size by dynamic: (width factor, height as a share of the lane)
+    GEM_SHAPE = {"accent": (1.15, 0.80), "normal": (1.0, 0.56), "ghost": (0.7, 0.32)}
+
     def _paint_notes(self, p, s, u_now):
         u0, u1 = self._visible(u_now)
         ppb = self._px_per_beat()
-        gem_w = max(10.0, min(30.0, ppb / 4 * 0.62))
+        base_w = max(10.0, min(30.0, ppb / 4 * 0.62))
         lane_idx = {ln: i for i, ln in enumerate(self.lanes)}
         for u, i, n, pas in s.notes_between(u0, u1):
             if n.lane not in lane_idx:
                 continue
             r = self._lane_rect(lane_idx[n.lane])
             x = self._x_of(u, u_now)
-            if x < LABEL_W - gem_w:
+            if x < LABEL_W - base_w:
                 continue
-            gem_h = r.height() * 0.58
+            wf, hf = self.GEM_SHAPE.get(n.dyn, self.GEM_SHAPE["normal"])
+            gem_w, gem_h = base_w * wf, r.height() * hf
             rect = QRectF(x - gem_w / 2, r.center().y() - gem_h / 2, gem_w, gem_h)
             j = s.judgement(pas, i)
             active = n.lane in self.active_lanes
@@ -251,19 +298,80 @@ class Highway(QWidget):
                 p.setPen(QPen(qc(color, 0.35), 1.5))
                 p.setBrush(Qt.NoBrush)
             elif j is None:
-                p.setPen(Qt.NoPen)
-                p.setBrush(qc(color, 0.45 + 0.55 * n.velocity / 127))
+                if n.dyn == "ghost":   # hollow: play it soft
+                    p.setPen(QPen(qc(color, 0.95), 2))
+                    p.setBrush(qc(color, 0.18))
+                elif n.dyn == "accent":  # solid with a bright rim: play it hard
+                    p.setPen(QPen(qc("#ffffff", 0.95), 2.5))
+                    p.setBrush(qc(color, 1.0))
+                else:
+                    p.setPen(Qt.NoPen)
+                    p.setBrush(qc(color, 0.85))
             elif j.grade == "miss":
                 p.setPen(QPen(qc(theme.BAD, 0.9), 2))
                 p.setBrush(qc(theme.BAD, 0.18))
             else:
                 fade = max(0.0, 1 - max(0.0, self._hit_x() - x) / 140)
                 gc = theme.GRADE_COLORS[j.grade]
-                p.setPen(QPen(qc(gc, fade), 2))
+                edge = theme.WARN if j.dynamic in ("too_soft", "too_loud") else gc
+                p.setPen(QPen(qc(edge, fade), 2))
                 p.setBrush(qc(gc, 0.55 * fade))
                 grow = 1 + 0.25 * (1 - fade)
                 rect = QRectF(x - gem_w * grow / 2, r.center().y() - gem_h * grow / 2, gem_w * grow, gem_h * grow)
             p.drawRoundedRect(rect, 6, 6)
+            if active and j is None:
+                size = min(9.0, r.height() * 0.08)
+                top = rect.top() - 3
+                if n.dyn == "accent":
+                    self._accent_mark(p, x, top, size)
+                    top -= 2 * size + 3
+                if n.open:
+                    self._open_mark(p, x, top, size)
+
+    def _accent_mark(self, p, x, bottom, size):
+        """The music accent sign (>) above a note."""
+        p.setPen(QPen(qc("#ffffff", 0.95), 2))
+        p.drawPolyline([QPointF(x - size, bottom - 2 * size), QPointF(x + size, bottom - size),
+                        QPointF(x - size, bottom)])
+
+    def _open_mark(self, p, x, bottom, size):
+        """The open hi-hat sign (a small circle) above a note."""
+        p.setPen(QPen(qc("#ffffff", 0.95), 2))
+        p.setBrush(Qt.NoBrush)
+        rad = size * 0.75
+        p.drawEllipse(QPointF(x, bottom - rad), rad, rad)
+
+    def _paint_legend(self, p):
+        """Explains accents, ghost notes and open hi-hats when the lesson has any."""
+        if not self._has_legend():
+            return
+        y = self._lane_rect(len(self.lanes) - 1).bottom() + 4
+        x = LABEL_W + 12
+        p.setFont(QFont("Segoe UI", 9))
+        if self.lesson.has_open_hats:
+            self._open_mark(p, x + 6, y + 15, 7)
+            label = "open hi-hat: lift your hi-hat foot"
+            p.setPen(qc(theme.MUTED))
+            p.drawText(QRectF(x + 18, y, 260, 18), Qt.AlignVCenter | Qt.AlignLeft, label)
+            x += 18 + p.fontMetrics().horizontalAdvance(label) + 24
+        items = (("accent", "accent: hit hard"), ("normal", "normal"), ("ghost", "ghost: very soft"))
+        for dyn, label in items if self.lesson.has_dynamics else ():
+            wf, hf = self.GEM_SHAPE[dyn]
+            w, h = 9 * wf, 22 * hf
+            rect = QRectF(x, y + (14 - h) / 2 + 2, w, h)
+            if dyn == "ghost":
+                p.setPen(QPen(qc(theme.TEXT, 0.9), 1.5))
+                p.setBrush(qc(theme.TEXT, 0.15))
+            elif dyn == "accent":
+                p.setPen(QPen(qc("#ffffff"), 1.5))
+                p.setBrush(qc(theme.MUTED))
+            else:
+                p.setPen(Qt.NoPen)
+                p.setBrush(qc(theme.MUTED))
+            p.drawRoundedRect(rect, 3, 3)
+            p.setPen(qc(theme.MUTED))
+            p.drawText(QRectF(x + w + 6, y, 120, 18), Qt.AlignVCenter | Qt.AlignLeft, label)
+            x += w + 6 + p.fontMetrics().horizontalAdvance(label) + 16
 
     def _paint_hit_line(self, p, now):
         x = self._hit_x()

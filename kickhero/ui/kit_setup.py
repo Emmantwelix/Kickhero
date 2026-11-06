@@ -1,16 +1,19 @@
 """My kit page: connection, pad setup wizard, latency calibration and sound options."""
 
 import time
+from pathlib import Path
 
 from PySide6.QtCore import Qt, QTimer
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel,
+                               QPushButton,
                                QScrollArea, QSlider, QVBoxLayout, QWidget)
 
 from ..engine.lesson import Lesson
 from ..engine.session import Session
+from ..engine.sounds import CUSTOM, KITS, SAMPLE_EXTS, match_kit_folder
 from ..kit.calibration import measure_latency
 from ..kit.mapping import KitMap
-from ..lanes import LANE_COLORS, LANE_NAMES, LANES
+from ..lanes import LANE_COLORS, LANE_NAMES, LANES, SOUND_NAMES, SOUNDS
 from . import theme
 
 CAL_BPM = 100
@@ -159,7 +162,52 @@ class KitPage(QWidget):
             vol.addWidget(s, r, 1)
         cl.addLayout(vol)
         lay.addWidget(c)
+
+        # --- drum sounds ---
+        c, cl = card("Drum sounds", "The sounds used when the app plays drums: \"Hear the part\", lanes you've "
+                                    "turned off, and pad hits (if turned on above). Click ▶ to listen.")
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Kit"))
+        self.kit_choice = QComboBox()
+        for key, name in KITS.items():
+            self.kit_choice.addItem(name, key)
+        self.kit_choice.addItem("My own sounds", CUSTOM)
+        self.kit_choice.setCurrentIndex(max(0, self.kit_choice.findData(ctx.settings["sound_kit"])))
+        self.kit_choice.currentIndexChanged.connect(lambda _: self._apply_kit())
+        row.addWidget(self.kit_choice)
+        self.folder_btn = QPushButton("Load a kit folder...")
+        self.folder_btn.setToolTip("Pick a folder of drum samples: one sample per drum is chosen by file name "
+                                   "(kick, snare, hat...), taking the hardest-hit layer")
+        self.folder_btn.clicked.connect(self._load_kit_folder)
+        row.addWidget(self.folder_btn)
+        row.addStretch()
+        cl.addLayout(row)
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(10)
+        self.sound_rows = {}
+        for r, lane in enumerate(SOUNDS):
+            play = QPushButton("▶")
+            play.setFixedWidth(40)
+            play.clicked.connect(lambda _=False, ln=lane: ctx.audio.play_pad(ln, 115))
+            name = QLabel(SOUND_NAMES[lane])
+            file_label = QLabel(objectName="muted")
+            choose = QPushButton("Choose...")
+            choose.clicked.connect(lambda _=False, ln=lane: self._choose_sample(ln))
+            clear = QPushButton("Built-in")
+            clear.setToolTip("Use the built-in sound for this drum")
+            clear.clicked.connect(lambda _=False, ln=lane: self._set_sample(ln, None))
+            for col, w in enumerate((play, name, file_label, choose, clear)):
+                grid.addWidget(w, r, col)
+            self.sound_rows[lane] = (file_label, choose, clear)
+        grid.setColumnStretch(2, 1)
+        cl.addLayout(grid)
+        self.sound_note = QLabel(objectName="muted", wordWrap=True)
+        cl.addWidget(self.sound_note)
+        cl.addWidget(QLabel("Your own sounds stay on this computer: Kickhero only reads them from where they are.",
+                            objectName="muted", wordWrap=True))
+        lay.addWidget(c)
         lay.addStretch()
+        self._refresh_sounds()
 
         ctx.midi.ports_changed.connect(self._ports_changed)
         ctx.midi.connected.connect(lambda _: self._refresh_status())
@@ -255,6 +303,69 @@ class KitPage(QWidget):
         self.ctx.kit = KitMap()
         self.ctx.save_kit()
         self._refresh_notes()
+
+    # ---------- drum sounds ----------
+
+    def _custom(self):
+        return dict(self.ctx.settings["custom_sounds"])
+
+    def _apply_kit(self, note=""):
+        kit = self.kit_choice.currentData()
+        errors = self.ctx.set_kit(kit, self._custom())
+        if errors:
+            failed = ", ".join(SOUND_NAMES[ln] for ln in errors)
+            note = f"{note}  Couldn't load: {failed} (using the built-in sound instead).".strip()
+        self.sound_note.setText(note)
+        self._refresh_sounds()
+
+    def _refresh_sounds(self):
+        custom = self.kit_choice.currentData() == CUSTOM
+        sounds = self._custom()
+        self.folder_btn.setVisible(custom)
+        for lane, (label, choose, clear) in self.sound_rows.items():
+            path = sounds.get(lane)
+            if custom and path:
+                label.setText(Path(path).name)
+                label.setToolTip(path)
+            else:
+                label.setText(f"built-in ({self.kit_choice.currentText() if not custom else 'Classic'})")
+                label.setToolTip("")
+            choose.setVisible(custom)
+            clear.setVisible(custom and bool(path))
+
+    def _set_sample(self, lane, path):
+        sounds = self._custom()
+        if path:
+            sounds[lane] = str(path)
+        else:
+            sounds.pop(lane, None)
+        self.ctx.settings["custom_sounds"] = sounds
+        self._apply_kit()
+
+    def _choose_sample(self, lane):
+        exts = " ".join(f"*{e}" for e in sorted(SAMPLE_EXTS))
+        start = self._custom().get(lane) or str(Path.home())
+        path, _ = QFileDialog.getOpenFileName(self, f"Sound for {SOUND_NAMES[lane]}", str(Path(start).parent),
+                                              f"Audio ({exts});;All files (*.*)")
+        if path:
+            self._set_sample(lane, path)
+            self.ctx.audio.play_pad(lane, 115)
+
+    def _load_kit_folder(self):
+        folder = QFileDialog.getExistingDirectory(self, "Choose a folder of drum samples", str(Path.home()))
+        if not folder:
+            return
+        found = match_kit_folder(folder)
+        if not found:
+            self.sound_note.setText("No drum samples recognised in that folder (file names need words like kick, "
+                                    "snare, hat, tom, ride, crash).")
+            return
+        sounds = self._custom()
+        sounds.update({lane: str(p) for lane, p in found.items()})
+        self.ctx.settings["custom_sounds"] = sounds
+        missing = [SOUND_NAMES[ln] for ln in SOUNDS if ln not in found]
+        self._apply_kit(f"Loaded {len(found)} sounds from {Path(folder).name}."
+                        + (f" Not found: {', '.join(missing)}." if missing else ""))
 
     # ---------- latency calibration ----------
 

@@ -56,6 +56,7 @@ QHeaderView::section {{
 QScrollBar:vertical {{ background: transparent; width: 10px; }}
 QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 5px; min-height: 30px; }}
 QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QDialog {{ background: {BG}; }}
 QMenu {{ background: {PANEL_2}; border: 1px solid {BORDER}; padding: 4px; }}
 QMenu::item {{ padding: 6px 18px; border-radius: 4px; }}

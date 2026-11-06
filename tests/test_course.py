@@ -7,7 +7,7 @@ from kickhero.progress import Progress
 def test_course_data_is_valid():
     units = load_course()
     assert validate(units) == []
-    assert len(units) == 8 and len(all_lessons(units)) >= 25
+    assert len(units) == 9 and len(all_lessons(units)) >= 25
 
 
 def test_every_lesson_builds_and_fits_its_bars():
@@ -49,3 +49,14 @@ def test_unlocking_follows_passes(tmp_path):
     assert unlocked(units, p.passed, unlock_all=True) == {les.id for les in lessons}
     assert next_lesson(units, lessons[0].id) is lessons[1]
     assert next_lesson(units, lessons[-1].id) is None
+
+
+def test_open_hihat_notation():
+    les = next(l for l in all_lessons(load_course()) if l.id == "open-and4")
+    lesson = les.to_lesson()
+    hats = [n for n in lesson.notes if n.lane == "hihat"][:8]
+    assert [n.open for n in hats] == [False] * 7 + [True]  # "x.x.x.x.x.x.x.o."
+    assert not any(n.open for n in lesson.notes if n.lane != "hihat")
+    bad = load_course()
+    bad[0].lessons[0].pattern = {"snare": "o..............."}
+    assert any("only the hi-hat can be open" in p for p in validate(bad))

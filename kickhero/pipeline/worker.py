@@ -29,6 +29,8 @@ def build_args(songs, output, options):
     args = [str(s) for s in songs] + ["-o", str(output), "--force"]
     for key in ("sensitivity", "gate", "ref_gate", "bleed_db", "min_gap", "hihat_open_ms"):
         args += ["--" + key.replace("_", "-"), f"{float(o[key]):g}"]
+    if o.get("bpm"):  # chosen per batch, never stored in the settings
+        args += ["--bpm", f"{float(o['bpm']):g}"]
     if o["quantize"]:
         args += ["--quantize", str(int(o["quantize"]))]
     if not o["align"]:

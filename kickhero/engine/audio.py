@@ -10,8 +10,10 @@ import time
 
 import numpy as np
 
+from ..lanes import OPEN_HAT
 from .sounds import SoundBank
 
+CHOKE_FADE_S = 0.008  # a closed hi-hat cuts a ringing open hi-hat off over this long
 RESYNC_S = 0.015  # backing track jumps to the transport position only if they drift further apart than this
 
 
@@ -29,10 +31,13 @@ def _pick_device():
 
 
 class AudioEngine:
-    def __init__(self):
+    def __init__(self, kit="classic", custom_sounds=None):
+        self.kit = kit
+        self.custom_sounds = custom_sounds or {}
         self.session = None          # engine.session.Session currently playing, or None
         self.metronome = True
         self.guide_all = False       # also play the notes of lanes you are practising
+        self.muted = set()           # lanes never played back (the speaker buttons on the practice screen)
         self.volume = {"metronome": 0.6, "guide": 0.5, "pads": 0.8, "backing": 0.8}
         self.backing = None          # (mono float32 array at self.sr, offset seconds)
         self.backing_on = True
@@ -56,14 +61,14 @@ class AudioEngine:
             device = _pick_device()
             sr = int(sd.query_devices(device, "output")["default_samplerate"]) if device is not None else 48000
             self.sr = sr
-            self.bank = SoundBank(sr)
+            self.bank = SoundBank(sr, self.kit, self.custom_sounds)
             self._stream = sd.OutputStream(device=device, samplerate=sr, channels=2, dtype="float32",
                                            blocksize=256, latency="low", callback=self._callback)
             self._stream.start()
             self.output_latency = self._stream.latency
         except Exception as e:  # no audio device: the app still works, silently
             self.error = str(e)
-            self.bank = self.bank or SoundBank(self.sr)
+            self.bank = self.bank or SoundBank(self.sr, self.kit, self.custom_sounds)
 
     def stop(self):
         if self._stream:
@@ -71,8 +76,16 @@ class AudioEngine:
             self._stream.close()
             self._stream = None
 
+    def set_kit(self, kit, custom_sounds=None):
+        """Switch drum sounds. Returns {lane: error} for custom samples that couldn't be loaded."""
+        self.kit, self.custom_sounds = kit, custom_sounds or {}
+        bank = SoundBank(self.sr, kit, self.custom_sounds)
+        self.bank = bank  # the audio thread picks up the new bank on its next buffer
+        return bank.errors
+
     def play_pad(self, lane, velocity):
-        """Play a drum sound right away (pad sounds for kits without their own sound module)."""
+        """Play a drum sound right away (pad sounds for kits without their own sound module).
+        lane can also be OPEN_HAT."""
         if self.bank:
             with self._lock:
                 self._pending.append((self.bank.drums[lane], self.volume["pads"] * (velocity / 127) ** 1.5))
@@ -141,14 +154,16 @@ class AudioEngine:
                     voices.append([self.bank.clicks[accent], -int((u - u0) / span * frames),
                                    self.volume["metronome"]])
             for u, i, n, p in s.notes_between(u0, u1):
-                if self.guide_all or n.lane not in s.lanes:
-                    voices.append([self.bank.drums[n.lane], -int((u - u0) / span * frames),
+                if (self.guide_all or n.lane not in s.lanes) and n.lane not in self.muted:
+                    sound = OPEN_HAT if n.open else n.lane
+                    voices.append([self.bank.drums[sound], -int((u - u0) / span * frames),
                                    self.volume["guide"] * (n.velocity / 127) ** 1.5])
             backing = self._mix_backing(s, u0, frames)
         else:
             backing = None
             self._backing_pos = None
 
+        self._choke(voices)
         alive = []
         for v in voices:
             samples, pos, gain = v
@@ -166,6 +181,26 @@ class AudioEngine:
         if backing is not None:
             out += backing
         np.clip(out, -1, 1, out=out)
+
+    def _choke(self, voices):
+        """A closed hi-hat stops a ringing open hi-hat, like closing the pedal on a real kit.
+        A voice's position is negative while it waits to start inside this buffer."""
+        drums = self.bank.drums
+        closes = [max(0, -v[1]) for v in voices if v[0] is drums["hihat"]]
+        if not closes:
+            return
+        fade = int(CHOKE_FADE_S * self.sr)
+        for v in voices:
+            if v[0] is not drums[OPEN_HAT]:
+                continue
+            start = max(0, -v[1])
+            later = [c for c in closes if c > start]
+            if later:
+                cut = v[1] + min(later) + fade  # sample index in the open hat where it has faded out
+                x = v[0][:max(0, cut)].copy()
+                k = min(fade, len(x))
+                x[len(x) - k:] *= np.linspace(1, 0, k, dtype=np.float32)
+                v[0] = x
 
     def _mix_backing(self, s, u0, frames):
         """The drumless song for this buffer (stereo), or None. Only at 100% speed (slowed audio needs

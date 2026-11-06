@@ -10,9 +10,11 @@ Nothing here reads a clock; callers pass `now`, which keeps it testable.
 
 import bisect
 import math
+import statistics
+from collections import deque
 
 from ..lanes import LANES
-from .scoring import HIT_WINDOW, PassScorer
+from .scoring import DEFAULT_NORMAL_VELOCITY, HIT_WINDOW, PassScorer
 
 AUTO_SPEED_STEP = 0.05
 AUTO_SPEED_ACCURACY = 0.90
@@ -20,7 +22,8 @@ AUTO_SPEED_ACCURACY = 0.90
 
 class Session:
     def __init__(self, lesson, speed=1.0, loop_bars=None, looping=False, lanes=None, wait_mode=False,
-                 count_in_bars=1, auto_speed_up=False, target_speed=1.0):
+                 count_in_bars=1, auto_speed_up=False, target_speed=1.0, rate_dynamics=False,
+                 speed_steps=None):
         self.lesson = lesson
         first, last = loop_bars or (0, lesson.bars)
         self.a, self.b = first * lesson.bar, last * lesson.bar
@@ -31,6 +34,10 @@ class Session:
         self.count_in = count_in_bars * lesson.bar
         self.auto_speed_up = auto_speed_up
         self.target_speed = target_speed
+        self.speed_steps = sorted(speed_steps) if speed_steps else None  # auto speed-up jumps between these
+        self.rate_dynamics = rate_dynamics
+        self._normal_hits = {}             # lane -> recent velocities of hits on normal notes
+        self._normal_all = deque(maxlen=24)
         self._times = [n.t for n in lesson.notes]
         self._tp = None  # transport: (start_perf, u at start_perf, speed, paused u or None)
         self._initial_speed = speed
@@ -129,8 +136,24 @@ class Session:
 
     # ---------- input ----------
 
-    def hit(self, lane, perf):
-        """A pad hit on `lane` at perf time (already latency-corrected). Returns a Judgement or None."""
+    def normal_level(self, lane):
+        """The player's own normal hit strength on this lane (median of recent normal-note hits),
+        falling back to all lanes, then to a default, until enough hits have been heard."""
+        own = self._normal_hits.get(lane, ())
+        if len(own) >= 3:
+            return statistics.median(own)
+        if len(self._normal_all) >= 3:
+            return statistics.median(self._normal_all)
+        return DEFAULT_NORMAL_VELOCITY
+
+    def _learn_level(self, lane, velocity):
+        self._normal_hits.setdefault(lane, deque(maxlen=16)).append(velocity)
+        self._normal_all.append(velocity)
+
+    def hit(self, lane, perf, velocity=0, opened=None):
+        """A pad hit on `lane` at perf time (already latency-corrected). Returns a Judgement or None.
+        velocity 0 = unknown (keyboard): dynamics aren't rated. opened: for hi-hat hits, whether the
+        kit says the hi-hat was open (None = it can't tell); rated only in lessons with open hi-hats."""
         if self._tp is None or self.done or lane not in self.lanes:
             return None
         u = self.u_at(perf)
@@ -144,7 +167,14 @@ class Session:
                 best = (q, c[0], c[1])
         if best:
             q, i, _ = best
-            return self.scorers[q].judge(i, u - q * self.L, grade="perfect" if self.paused else None)
+            note = self.lesson.notes[i]
+            level = self.normal_level(lane) if self.rate_dynamics and velocity else None
+            j = self.scorers[q].judge(i, u - q * self.L, grade="perfect" if self.paused else None,
+                                      velocity=velocity, normal_level=level,
+                                      opened=opened if self.lesson.has_open_hats else None)
+            if velocity and note.dyn == "normal":
+                self._learn_level(lane, velocity)
+            return j
         if self.in_count_in(u) or (p > 0 and not self.looping) or p in self.finished_passes:
             return None
         return self.scorer(p).extra(lane)
@@ -189,7 +219,10 @@ class Session:
                 events.append(("finished", summary))
                 break
             if self.auto_speed_up and summary["accuracy"] >= AUTO_SPEED_ACCURACY and self.speed < self.target_speed:
-                new = min(self.target_speed, round(self.speed + AUTO_SPEED_STEP, 2))
+                new = round(self.speed + AUTO_SPEED_STEP, 2)
+                if self.speed_steps:
+                    new = next((x for x in self.speed_steps if x > self.speed + 1e-9), new)
+                new = min(self.target_speed, new)
                 self.set_speed(new, now)
                 events.append(("speed", new))
         return events

@@ -151,11 +151,13 @@ class LibraryPage(QWidget):
         if row < 0:
             return
         path = self.paths[row]
-        source = read_metadata(path).get("source")
+        meta = read_metadata(path)
+        source = meta.get("source")
         menu = QMenu(self)
         menu.addAction("Practise", lambda: self.practise.emit(path))
         if source and Path(source).exists():
-            menu.addAction("Convert again (with the current conversion settings)", lambda: self.convert([source]))
+            menu.addAction("Convert again (fix the tempo, missing or extra notes)...",
+                           lambda: self.convert([source], detected_bpm=meta.get("bpm")))
         else:
             menu.addAction("Convert again: add the song file again (original not found)").setEnabled(False)
         menu.addAction("Show in folder", lambda: os.startfile(path.parent))
@@ -186,17 +188,26 @@ class LibraryPage(QWidget):
     def dropEvent(self, e):
         self.convert([u.toLocalFile() for u in e.mimeData().urls()])
 
-    def convert(self, paths):
+    def convert(self, paths, detected_bpm=None):
+        """Ask how to convert the songs (tempo, fine-tuning), then convert them or queue them."""
         songs = song_files(p for p in paths if p)
         if not songs:
             return
+        dlg = ConvertSettingsDialog(self.ctx.settings["convert"], self, songs=songs, detected_bpm=detected_bpm)
+        if not dlg.exec():
+            return
+        self.ctx.settings["convert"] = dlg.result_options()
+        self._start(songs, dict(dlg.result_options(), bpm=dlg.tempo()))
+
+    def _start(self, songs, options):
         if self.job and self.job.running:
-            self.queue += songs
-            self.conv_note.setText(f"{len(self.queue)} more song(s) queued.")
+            self.queue.append((songs, options))
+            n = sum(len(s) for s, _ in self.queue)
+            self.conv_note.setText(f"{n} more song{'s' if n != 1 else ''} queued.")
             return
         out = self.ctx.settings.library_dir
         out.mkdir(parents=True, exist_ok=True)
-        self.job = ConvertJob(songs, out, self.ctx.settings["convert"], self)
+        self.job = ConvertJob(songs, out, options, self)
         self.job.status.connect(self.conv_status.setText)
         self.job.fraction.connect(lambda f: self.bar.setValue(int(f * 1000)))
         self.job.song_done.connect(lambda *_: self.refresh())
@@ -219,9 +230,8 @@ class LibraryPage(QWidget):
     def _job_finished(self, ok, failed):
         self.refresh()
         if self.queue:
-            nxt, self.queue = self.queue, []
             self.job = None
-            self.convert(nxt)
+            self._start(*self.queue.pop(0))
             return
         self.stop_btn.setEnabled(False)
         if failed:

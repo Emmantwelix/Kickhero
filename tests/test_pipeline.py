@@ -31,6 +31,8 @@ def test_build_args_defaults_and_options():
     assert args[args.index("--sensitivity") + 1] == "0.05"
     assert args[args.index("--quantize") + 1] == "16"
     assert "--no-align" in args and "--no-split-toms" not in args
+    assert "--bpm" not in args
+    assert build_args(["a.mp3"], "out", {"bpm": 100.0})[-2:] == ["--bpm", "100"]
 
 
 def test_lesson_reads_sidecar_metadata(tmp_path):
@@ -55,6 +57,8 @@ def test_lesson_without_metadata_and_hihat_merge(tmp_path):
     assert lesson.bpm == pytest.approx(100)
     # closed + open hi-hat on the same hit become one hi-hat note
     assert sorted(n.lane for n in lesson.notes) == ["hihat", "kick", "kick", "snare"]
+    assert [n.open for n in lesson.notes if n.lane == "hihat"] == [True]  # ...and it's an open one
+    assert lesson.has_open_hats
 
 
 def test_progress_best_and_streak(tmp_path):

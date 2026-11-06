@@ -1,10 +1,17 @@
-"""A lesson: the notes to play (time, lane, velocity) at a fixed tempo, in whole 4/4 bars."""
+"""A lesson: the notes to play (time, lane, velocity, open hi-hat or not) at a fixed tempo, in whole 4/4 bars."""
 
 import math
-from dataclasses import dataclass, field
+import statistics
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
-from ..lanes import NOTE_TO_LANE
+from ..lanes import NOTE_TO_LANE, OPEN_HAT_NOTES
+
+
+ACCENT_MIN = 116      # velocity from which a note can be an accent...
+ACCENT_LANE_MAX = 108  # ...if the lane's typical (median) note is no louder than this
+GHOST_MAX = 64        # velocity up to which a note can be a ghost note...
+GHOST_RATIO = 0.65    # ...if it's also well below the lane's loudest note
 
 
 @dataclass(frozen=True)
@@ -12,6 +19,28 @@ class Note:
     t: float        # seconds from the start of bar 1, at 100% speed
     lane: str
     velocity: int = 100
+    dyn: str = "normal"  # "accent", "normal" or "ghost": how hard to play it
+    open: bool = False   # hi-hat only: an open hi-hat
+
+
+def classify_dynamics(notes):
+    """Mark accents and ghost notes. Relative to each lane, so a lane where every hit is loud
+    (common in converted songs) has no accents, while a soft note under loud backbeats is a ghost."""
+    by_lane = {}
+    for n in notes:
+        by_lane.setdefault(n.lane, []).append(n.velocity)
+    stats = {lane: (statistics.median(v), max(v)) for lane, v in by_lane.items()}
+    out = []
+    for n in notes:
+        median, loudest = stats[n.lane]
+        if n.velocity >= ACCENT_MIN and median <= ACCENT_LANE_MAX:
+            dyn = "accent"
+        elif n.velocity <= GHOST_MAX and n.velocity <= GHOST_RATIO * loudest:
+            dyn = "ghost"
+        else:
+            dyn = "normal"
+        out.append(replace(n, dyn=dyn))
+    return out
 
 
 @dataclass
@@ -41,6 +70,14 @@ class Lesson:
     def lanes_used(self):
         return {n.lane for n in self.notes}
 
+    @property
+    def has_dynamics(self):
+        return any(n.dyn != "normal" for n in self.notes)
+
+    @property
+    def has_open_hats(self):
+        return any(n.open for n in self.notes)
+
     def difficulty(self):
         """Rough 1-10 score from note density and how many limbs play at once."""
         if not self.notes:
@@ -54,8 +91,9 @@ class Lesson:
 
 
 def from_notes(title, bpm, notes, bars=None, **kw):
-    """Build a lesson from (t, lane, velocity) tuples; bars defaults to just enough to fit them."""
-    notes = sorted((Note(float(t), lane, int(v)) for t, lane, v in notes), key=lambda n: (n.t, n.lane))
+    """Build a lesson from (t, lane, velocity[, open]) tuples; bars defaults to just enough to fit them."""
+    notes = classify_dynamics(sorted((Note(float(n[0]), n[1], int(n[2]), open=bool(n[3:] and n[3]))
+                                      for n in notes), key=lambda n: (n.t, n.lane)))
     bar = 240.0 / bpm
     if bars is None:
         last = notes[-1].t if notes else 0.0
@@ -74,7 +112,7 @@ def load_midi(path, quantize=0, title=None):
     instruments = [i for i in pm.instruments if i.is_drum] or pm.instruments
     step = 60.0 / bpm * 4 / quantize if quantize else 0
 
-    best = {}  # (lane, time) -> velocity; merges e.g. open + closed hi-hat on the same hit
+    best = {}  # (lane, time) -> (time, velocity, open); merges e.g. open + closed hi-hat on the same hit
     for inst in instruments:
         for n in inst.notes:
             lane = NOTE_TO_LANE.get(n.pitch)
@@ -82,9 +120,10 @@ def load_midi(path, quantize=0, title=None):
                 continue
             t = round(n.start / step) * step if step else n.start
             key = (lane, round(t / 0.02))  # notes on one lane within 20 ms are one hit
-            if n.velocity > best.get(key, (0, 0))[1]:
-                best[key] = (t, n.velocity)
-    notes = [(t, lane, v) for (lane, _), (t, v) in best.items()]
+            prev = best.get(key, (t, 0, False))
+            is_open = n.pitch in OPEN_HAT_NOTES or prev[2]
+            best[key] = (t, n.velocity, is_open) if n.velocity > prev[1] else (prev[0], prev[1], is_open)
+    notes = [(t, lane, v, is_open) for (lane, _), (t, v, is_open) in best.items()]
 
     meta = read_metadata(path)
     backing = path.parent / meta["backing"] if meta.get("backing") else None

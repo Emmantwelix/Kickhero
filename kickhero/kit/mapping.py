@@ -5,7 +5,7 @@ Every kit starts from the General MIDI layout, which most kits follow. The setup
 A note mapped to "" is ignored (e.g. the hi-hat pedal chick).
 """
 
-from ..lanes import HIHAT_PEDAL, LANES, NOTE_TO_LANE
+from ..lanes import CLOSED_HAT_NOTES, HIHAT_PEDAL, LANES, NOTE_TO_LANE, OPEN_HAT_NOTES
 
 
 class KitMap:
@@ -35,6 +35,18 @@ class KitMap:
         m = cls()
         m.notes = {int(n): lane for n, lane in data.items()}
         return m
+
+
+def hat_open(note, pedal=None, kit_opens=False):
+    """Was a hi-hat hit open? True/False, or None when the kit can't tell (no hi-hat pedal).
+    Kits with a pedal send the open note (46) while it's lifted, and/or the pedal position as
+    CC4 (`pedal`, 0 = fully open). kit_opens: the kit has sent an open note before, so its
+    closed note really means closed."""
+    if note in OPEN_HAT_NOTES:
+        return True
+    if note in CLOSED_HAT_NOTES:
+        return False if kit_opens or pedal is not None else None
+    return pedal < 64 if pedal is not None else None
 
 
 def load_kit(settings, device):

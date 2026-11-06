@@ -14,11 +14,16 @@ tap-along test measures your setup's delay. No kit? Play with the computer keybo
 
 - **Songs**: drag songs onto the window; they're converted in the background. Practise with the
   drumless song playing along.
-- **Practice tools**: speed 40-150%, loop any bars, auto speed-up, "wait for me" mode, turn lanes off to
+- **Practice tools**: speed buttons (Slow 50%, Medium 75%, Normal, Max 125%), loop any bars, auto speed-up, "wait for me" mode, turn lanes off to
   practise one limb, hear the drum part, results with stars and timing advice.
-- **Beginner course**: 29 lessons in 8 units (keeping time, rock beats, kick variations, sixteenths,
-  cymbals, fills, rudiments, ghost notes), unlocked one by one.
-- **Any kit**: pad setup wizard, latency calibration, optional drum sounds from the app.
+- **Beginner course**: 32 lessons in 9 units (keeping time, rock beats, kick variations, sixteenths,
+  cymbals, fills, rudiments, ghost notes, open hi-hat), unlocked one by one.
+- **Dynamics**: accents (tall notes with an accent mark) and ghost notes (small hollow notes) are shown
+  and rated against your own normal playing level, so it works with any kit's velocity response.
+- **Open hi-hat**: open hi-hats are marked with a circle and get their own sound. With a hi-hat pedal
+  (the kit sends the open note or the pedal position), opening and closing is rated too.
+- **Any kit**: pad setup wizard, latency calibration, and drum sounds from the app: three built-in kits
+  (Classic, 808, Tight) or your own samples, picked per drum or matched from a kit folder.
 
 ## Install (Windows)
 
@@ -75,7 +80,7 @@ tests/             pytest
 ## Writing lessons
 
 Course lessons live in `kickhero/course/beginner.json`. Each lane's part is written on a 16th-note grid,
-16 characters per bar: `x` hit, `X` accent, `g` ghost note, `.` rest, `|` between bars:
+16 characters per bar: `x` hit, `X` accent, `g` ghost note, `o` open hi-hat, `.` rest, `|` between bars:
 
 ```json
 {"id": "rock-basic", "title": "The basic rock beat", "bpm": 70, "repeats": 4,

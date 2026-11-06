@@ -13,8 +13,9 @@ from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, 
                                QStackedWidget, QVBoxLayout, QWidget)
 
 from .engine.audio import AudioEngine
-from .kit.mapping import load_kit, save_kit
+from .kit.mapping import hat_open, load_kit, save_kit
 from .kit.midi_input import MidiInput
+from .lanes import OPEN_HAT, OPEN_HAT_NOTES
 from .progress import Progress
 from .settings import Settings
 from .ui import theme
@@ -30,14 +31,14 @@ ICON = Path(__file__).with_name("assets") / "kickhero.png"
 class AppContext(QObject):
     """Shared services: settings, audio, MIDI kit, progress. Turns raw kit notes into lane hits."""
 
-    lane_hit = Signal(str, int, float)        # lane, velocity, latency-corrected perf time
+    lane_hit = Signal(str, int, float, object)  # lane, velocity, latency-corrected perf, hi-hat open (None = ?)
     raw_note = Signal(int, int, float, object)  # note, velocity, perf, lane ("" ignored, None unknown)
 
     def __init__(self):
         super().__init__()
         self.settings = Settings()
         self.progress = Progress()
-        self.audio = AudioEngine()
+        self.audio = AudioEngine(self.settings["sound_kit"], self.settings["custom_sounds"])
         for key in ("metronome", "guide", "pads", "backing"):
             self.audio.volume[key] = self.settings[f"volume_{key}"]
         self.audio.start()
@@ -45,8 +46,12 @@ class AppContext(QObject):
         self.kit = load_kit(self.settings, self.settings["midi_device"])
         self.midi.connected.connect(self._device_connected)
         self.midi.hit.connect(self._on_midi)
+        self.midi.pedal.connect(self._on_pedal)
+        self.pedal = None          # last hi-hat pedal position (CC4), None until the kit sends one
+        self.kit_opens = False     # has this kit sent an open hi-hat note yet?
 
     def _device_connected(self, name):
+        self.pedal, self.kit_opens = None, False
         if name:
             self.settings["midi_device"] = name
             self.kit = load_kit(self.settings, name)
@@ -54,18 +59,31 @@ class AppContext(QObject):
     def save_kit(self):
         save_kit(self.settings, self.midi.port_name or self.settings["midi_device"] or "default", self.kit)
 
+    def _on_pedal(self, value):
+        self.pedal = value
+
     def _on_midi(self, note, velocity, perf):
         lane = self.kit.lane_for(note)
         self.raw_note.emit(note, velocity, perf, lane)
         if lane:
+            opened = None
+            if lane == "hihat":
+                self.kit_opens |= note in OPEN_HAT_NOTES
+                opened = hat_open(note, self.pedal, self.kit_opens)
             if self.settings["pad_sounds"]:
-                self.audio.play_pad(lane, velocity)
-            self.lane_hit.emit(lane, velocity, perf - self.settings["latency_ms"] / 1000)
+                self.audio.play_pad(OPEN_HAT if opened else lane, velocity)
+            self.lane_hit.emit(lane, velocity, perf - self.settings["latency_ms"] / 1000, opened)
 
     def keyboard_hit(self, lane):
-        """A computer-keyboard 'pad' (no kit needed). Always audible, no latency correction."""
+        """A computer-keyboard 'pad' (no kit needed). Always audible, no latency correction.
+        Velocity 0 = unknown, so dynamics aren't rated for keyboard hits."""
         self.audio.play_pad(lane, 110)
-        self.lane_hit.emit(lane, 110, time.perf_counter())
+        self.lane_hit.emit(lane, 0, time.perf_counter(), None)
+
+    def set_kit(self, kit, custom_sounds):
+        """Switch the app's drum sounds; returns {lane: error} for samples that failed to load."""
+        self.settings["sound_kit"] = kit
+        return self.audio.set_kit(kit, custom_sounds)
 
     def set_volume(self, key, value):
         self.audio.volume[key] = value
@@ -159,9 +177,9 @@ class MainWindow(QMainWindow):
         self.nav_for[page].setChecked(True)
         self._show_streak()
 
-    def _lane_hit(self, lane, velocity, perf):
+    def _lane_hit(self, lane, velocity, perf, opened):
         if self.stack.currentWidget() is self.practice:
-            self.practice.on_hit(lane, velocity, perf)
+            self.practice.on_hit(lane, velocity, perf, opened)
 
     def _show_device(self, name):
         self.device.setText(f"🥁  {name}" if name else "No kit connected")

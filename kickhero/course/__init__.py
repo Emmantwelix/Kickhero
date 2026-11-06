@@ -1,7 +1,7 @@
 """The built-in course: lessons written as drum patterns in course/*.json, turned into practice lessons.
 
 Pattern notation (one string per lane): 16 characters per bar, one per 16th note.
-x = hit, X = accent, g = ghost note, . = rest, | separates bars.
+x = hit, X = accent, g = ghost note, o = open hi-hat (hi-hat lane only), . = rest, | separates bars.
 """
 
 import json
@@ -12,7 +12,8 @@ from ..engine.lesson import from_notes
 from ..lanes import LANES
 
 STEPS_PER_BAR = 16
-VELOCITY = {"x": 100, "X": 124, "g": 45}
+VELOCITY = {"x": 100, "X": 124, "g": 45, "o": 100}
+OPEN = "o"
 PASS_SPEED = 0.999   # a lesson counts as passed with 1+ star at 100% speed
 COURSE_FILE = Path(__file__).with_name("beginner.json")
 
@@ -46,7 +47,7 @@ class CourseLesson:
                     for i, ch in enumerate(cells):
                         if ch in VELOCITY:
                             t = ((rep * bar_count + b) * STEPS_PER_BAR + i) * step
-                            notes.append((t, lane, VELOCITY[ch]))
+                            notes.append((t, lane, VELOCITY[ch], ch == OPEN))
         return from_notes(f"{self.number}  {self.title}", self.bpm, notes, bars=bar_count * self.repeats)
 
 
@@ -106,4 +107,6 @@ def validate(units):
                 for bar in pattern.split("|"):
                     if len(bar) != STEPS_PER_BAR or set(bar) - set(VELOCITY) - {"."}:
                         problems.append(f"{les.number} {lane}: bad bar {bar!r}")
+                    elif OPEN in bar and lane != "hihat":
+                        problems.append(f"{les.number} {lane}: only the hi-hat can be open")
     return problems
