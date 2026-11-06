@@ -58,7 +58,7 @@ def fetch_ffmpeg():
 
 def pyinstaller():
     print("Building the app with PyInstaller...")
-    subprocess.run([sys.executable, "-m", "PyInstaller", str(ROOT / "packaging" / "kickhero.spec"), "--noconfirm",
+    subprocess.run([sys.executable, "-m", "PyInstaller", str(ROOT / "packaging" / "kickhero.spec"), "--noconfirm", "--clean",
                     "--distpath", str(BUILD / "dist"), "--workpath", str(BUILD / "work")], check=True)
     for f in ("LICENSE", "THIRD_PARTY_LICENSES.md"):
         shutil.copy(ROOT / f, BUILD / "dist" / "Kickhero" / f)
