@@ -1,0 +1,160 @@
+{
+  "title": "Beginner course",
+  "notation": "Each bar is 16 characters, one per 16th note (4 per beat). x = hit, X = accent, g = ghost note (soft), . = rest. Separate bars with |. A lane's pattern repeats if it is shorter than the others.",
+  "units": [
+    {
+      "title": "1. Keeping time",
+      "about": "Steady quarter notes: the heartbeat of every groove. Count 1, 2, 3, 4 out loud as you play.",
+      "lessons": [
+        {"id": "time-snare", "title": "Quarter notes on the snare", "bpm": 70, "repeats": 4,
+         "tip": "One hit per click. Let the stick bounce back up after each hit.",
+         "pattern": {"snare": "x...x...x...x..."}},
+        {"id": "time-hihat", "title": "Quarter notes on the hi-hat", "bpm": 70, "repeats": 4,
+         "tip": "Keep the hi-hat pedal pressed down with your left foot so the hi-hat stays closed.",
+         "pattern": {"hihat": "x...x...x...x..."}},
+        {"id": "time-kick", "title": "Kick drum on every beat", "bpm": 70, "repeats": 4,
+         "tip": "Play from the ankle, heel down, and let the beater come back off the head.",
+         "pattern": {"kick": "x...x...x...x..."}},
+        {"id": "time-together", "title": "Hands and feet together", "bpm": 70, "repeats": 4,
+         "tip": "Hi-hat and kick land at exactly the same moment. Listen for one sound, not two.",
+         "pattern": {"hihat": "x...x...x...x...", "kick": "x...x...x...x..."}}
+      ]
+    },
+    {
+      "title": "2. Your first rock beat",
+      "about": "Eighth notes on the hi-hat, snare on 2 and 4, kick on 1 and 3. The beat behind thousands of songs.",
+      "lessons": [
+        {"id": "rock-eighths", "title": "Eighth notes on the hi-hat", "bpm": 70, "repeats": 4,
+         "tip": "Two even hits per click. Count \"1 and 2 and 3 and 4 and\".",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x."}},
+        {"id": "rock-backbeat", "title": "Add the backbeat", "bpm": 70, "repeats": 4,
+         "tip": "The snare lands on 2 and 4, together with the hi-hat.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x..."}},
+        {"id": "rock-basic", "title": "The basic rock beat", "bpm": 70, "repeats": 4,
+         "tip": "Kick on 1 and 3, snare on 2 and 4, hi-hat on every eighth. Go slow until it feels automatic.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x.......x......."}},
+        {"id": "rock-basic-90", "title": "Rock beat at 90 BPM", "bpm": 90, "repeats": 6,
+         "tip": "Same beat, a bit faster. Stay relaxed: tension makes you rush.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x.......x......."}}
+      ]
+    },
+    {
+      "title": "3. Kick drum variations",
+      "about": "Moving the kick around is the easiest way to make a beat your own.",
+      "lessons": [
+        {"id": "kick-and3", "title": "Kick on the \"and\" of 3", "bpm": 75, "repeats": 4,
+         "tip": "The extra kick sits between beat 3 and beat 4, with the hi-hat.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x.......x.x....."}},
+        {"id": "kick-and2", "title": "Kick on the \"and\" of 2", "bpm": 75, "repeats": 4,
+         "tip": "This one pushes forward: the kick comes just after the snare on 2.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x.....x.x......."}},
+        {"id": "kick-two-bar", "title": "Two-bar kick pattern", "bpm": 75, "repeats": 3,
+         "tip": "Bar one and bar two have different kick parts. Watch the bar numbers.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...",
+                     "kick": "x.......x.x.....|x.....x.x......."}},
+        {"id": "kick-four-floor", "title": "Four on the floor", "bpm": 100, "repeats": 6,
+         "tip": "Kick on every beat, like dance and disco music.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x...x...x...x..."}}
+      ]
+    },
+    {
+      "title": "4. Sixteenth notes",
+      "about": "Four notes per beat. Alternate your hands (right, left, right, left) on the hi-hat.",
+      "lessons": [
+        {"id": "sixteenths-hihat", "title": "Sixteenths on the hi-hat", "bpm": 60, "repeats": 4,
+         "tip": "Count \"1 e and a, 2 e and a\". Keep every note the same volume.",
+         "pattern": {"hihat": "xxxxxxxxxxxxxxxx"}},
+        {"id": "sixteenths-groove", "title": "Sixteenth-note groove", "bpm": 60, "repeats": 4,
+         "tip": "Right hand moves to the snare on 2 and 4 while the left keeps the hi-hat going.",
+         "pattern": {"hihat": "xxxxxxxxxxxxxxxx", "snare": "....x.......x...", "kick": "x.......x......."}},
+        {"id": "sixteenths-accents", "title": "Accents on the beat", "bpm": 60, "repeats": 4,
+         "tip": "Play the first hi-hat note of each beat louder than the other three.",
+         "pattern": {"hihat": "XxxxXxxxXxxxXxxx", "snare": "....x.......x...", "kick": "x.......x......."}},
+        {"id": "sixteenths-syncopated", "title": "Syncopated kick", "bpm": 65, "repeats": 4,
+         "tip": "The kick lands on the \"a\" before beat 3. Count the sixteenths.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x......xx.....x."}}
+      ]
+    },
+    {
+      "title": "5. Ride and crash",
+      "about": "Cymbals give a song its sections: the ride for big choruses, a crash to mark the start of a phrase.",
+      "lessons": [
+        {"id": "cym-ride", "title": "Rock beat on the ride", "bpm": 80, "repeats": 4,
+         "tip": "Same beat as before, but your right hand plays the ride cymbal instead of the hi-hat.",
+         "pattern": {"ride": "x.x.x.x.x.x.x.x.", "snare": "....x.......x...", "kick": "x.......x......."}},
+        {"id": "cym-crash", "title": "Crash on beat 1", "bpm": 80, "repeats": 3,
+         "tip": "Hit the crash together with the kick at the start of each two-bar phrase, then back to the hi-hat.",
+         "pattern": {"crash": "x...............|................",
+                     "hihat": "....x.x.x.x.x.x.|x.x.x.x.x.x.x.x.",
+                     "snare": "....x.......x...", "kick": "x.......x......."}},
+        {"id": "cym-phrase", "title": "Four-bar phrase", "bpm": 90, "repeats": 2,
+         "tip": "Crash on bar 1, then three bars of groove. Feel the four bars as one phrase.",
+         "pattern": {"crash": "x...............|................|................|................",
+                     "hihat": "....x.x.x.x.x.x.|x.x.x.x.x.x.x.x.|x.x.x.x.x.x.x.x.|x.x.x.x.x.x.x.x.",
+                     "snare": "....x.......x...", "kick": "x.......x.x....."}}
+      ]
+    },
+    {
+      "title": "6. Fills",
+      "about": "A fill is a short break from the beat that leads into the next section. Keep the tempo steady through it.",
+      "lessons": [
+        {"id": "fill-snare", "title": "Snare fill on beat 4", "bpm": 75, "repeats": 3,
+         "tip": "Three beats of groove, then four sixteenths on the snare. Come back in with the kick on 1.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.|x.x.x.x.x.x.....",
+                     "snare": "....x.......x...|....x.......xxxx",
+                     "kick": "x.......x.......|x.......x......."}},
+        {"id": "fill-toms", "title": "Down the toms", "bpm": 75, "repeats": 3,
+         "tip": "Two hits each on the high, mid and floor tom, then crash back into the beat.",
+         "pattern": {"crash": "x...............|................",
+                     "hihat": "....x.x.x.x.x.x.|x.x.x.x.........",
+                     "snare": "....x.......x...|....x...........",
+                     "tom1": "................|........xx......",
+                     "tom2": "................|..........xx....",
+                     "tom3": "................|............xx..",
+                     "kick": "x.......x.......|x..............."}},
+        {"id": "fill-phrase", "title": "Groove, fill, crash", "bpm": 85, "repeats": 2,
+         "tip": "Three bars of groove and a one-bar sixteenth fill around the kit. The crash on 1 tells everyone the fill is over.",
+         "pattern": {"crash": "x...............|................|................|................",
+                     "hihat": "....x.x.x.x.x.x.|x.x.x.x.x.x.x.x.|x.x.x.x.x.x.x.x.|................",
+                     "snare": "....x.......x...|....x.......x...|....x.......x...|xxxx............",
+                     "tom1": "................|................|................|....xxxx........",
+                     "tom2": "................|................|................|........xxxx....",
+                     "tom3": "................|................|................|............xxxx",
+                     "kick": "x.......x.......|x.......x.......|x.......x.......|x..............."}}
+      ]
+    },
+    {
+      "title": "7. Rudiments",
+      "about": "The building blocks of drumming, played on the snare. The app can't see which hand you use, so follow the sticking in each tip.",
+      "lessons": [
+        {"id": "rud-singles-8", "title": "Single strokes (eighths)", "bpm": 80, "repeats": 4,
+         "tip": "Alternate hands: R L R L. Both hands should sound exactly the same.",
+         "pattern": {"snare": "x.x.x.x.x.x.x.x."}},
+        {"id": "rud-singles-16", "title": "Single strokes (sixteenths)", "bpm": 70, "repeats": 4,
+         "tip": "R L R L at sixteenths. Keep the sticks low and relaxed.",
+         "pattern": {"snare": "xxxxxxxxxxxxxxxx"}},
+        {"id": "rud-doubles", "title": "Double strokes", "bpm": 60, "repeats": 4,
+         "tip": "R R L L. Two even strokes per hand: the second one is as loud as the first.",
+         "pattern": {"snare": "xxxxxxxxxxxxxxxx"}},
+        {"id": "rud-paradiddle", "title": "Paradiddle", "bpm": 60, "repeats": 4,
+         "tip": "R L R R  L R L L. Accent the first note of each group.",
+         "pattern": {"snare": "XxxxXxxxXxxxXxxx"}}
+      ]
+    },
+    {
+      "title": "8. Ghost notes",
+      "about": "Very soft snare notes between the backbeats. They make a groove feel alive. Watch the dim notes: play them barely touching the snare.",
+      "lessons": [
+        {"id": "ghost-intro", "title": "First ghost notes", "bpm": 70, "repeats": 4,
+         "tip": "Ghost notes from a couple of centimetres above the head; backbeats from high up.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "...gX......gX...", "kick": "x.......x......."}},
+        {"id": "ghost-groove", "title": "Ghost-note groove", "bpm": 75, "repeats": 4,
+         "tip": "Two ghost notes around each backbeat. Keep the hi-hat steady and the ghosts quiet.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": "....X..g.g..X..g", "kick": "x.....x...x....."}},
+        {"id": "ghost-sixteenths", "title": "Sixteenth-note ghost groove", "bpm": 70, "repeats": 4,
+         "tip": "The hardest one: kick and ghost notes weave between the hi-hats. Start at a low speed.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.", "snare": ".g..X..g.g.gX..g", "kick": "x..x..x...x..x.."}}
+      ]
+    }
+  ]
+}

@@ -1,0 +1,42 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kickhero"
+version = "0.1.0"
+description = "Turn songs into drum lessons and practise them on any electronic drum kit."
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.12"
+dependencies = [
+    "audio-separator[cpu]",
+    "librosa",
+    "numpy",
+    "pretty_midi",
+    "soundfile",
+    "soxr",
+    "PySide6>=6.7",
+    "python-rtmidi>=1.5",
+    "sounddevice>=0.4.6",
+]
+
+[project.optional-dependencies]
+dev = ["pytest"]
+build = ["pyinstaller>=6"]
+
+[project.scripts]
+song2drums = "kickhero.pipeline.song2drums:main"
+drums2midi = "kickhero.pipeline.drums2midi:main"
+
+[project.gui-scripts]
+kickhero = "kickhero.app:main"
+
+[tool.setuptools.packages.find]
+include = ["kickhero*"]
+
+[tool.setuptools.package-data]
+kickhero = ["assets/**/*", "course/*.json"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

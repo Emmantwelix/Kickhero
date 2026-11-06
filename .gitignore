@@ -1,0 +1,25 @@
+# Python
+env/
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# Build output
+build/
+dist/
+
+# Your music and everything made from it (never commit copyrighted audio)
+songs/
+drum_midi/
+*.mp3
+*.wav
+*.flac
+*.m4a
+*.ogg
+
+# Local settings
+gui_settings.json
+
+# Build logs
+*.log
