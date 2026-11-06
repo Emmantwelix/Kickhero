@@ -12,6 +12,7 @@ ACCENT_MIN = 116      # velocity from which a note can be an accent...
 ACCENT_LANE_MAX = 108  # ...if the lane's typical (median) note is no louder than this
 GHOST_MAX = 64        # velocity up to which a note can be a ghost note...
 GHOST_RATIO = 0.65    # ...if it's also well below the lane's loudest note
+MERGE_S = 0.020       # hits on one drum closer than this are one hit (e.g. closed + open hi-hat together)
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,21 @@ class Lesson:
         return max(1, min(10, round(per_sec * 0.45 + (poly - 1) * 2.5)))
 
 
+def merge_hits(hits):
+    """hits: (t, lane, velocity, open, *extra) tuples. On each drum, a hit within MERGE_S of the
+    previous one is merged into it: the louder hit's time, velocity and extras, open if either was."""
+    out, last = [], {}
+    for h in sorted(hits, key=lambda h: h[0]):
+        i = last.get(h[1])
+        if i is not None and h[0] - out[i][0] < MERGE_S:
+            loud = h if h[2] > out[i][2] else out[i]
+            out[i] = (loud[0], loud[1], loud[2], bool(h[3] or out[i][3]), *loud[4:])
+        else:
+            last[h[1]] = len(out)
+            out.append(tuple(h))
+    return out
+
+
 def from_notes(title, bpm, notes, bars=None, **kw):
     """Build a lesson from (t, lane, velocity[, open]) tuples; bars defaults to just enough to fit them."""
     notes = classify_dynamics(sorted((Note(float(n[0]), n[1], int(n[2]), open=bool(n[3:] and n[3]))
@@ -112,18 +128,14 @@ def load_midi(path, quantize=0, title=None):
     instruments = [i for i in pm.instruments if i.is_drum] or pm.instruments
     step = 60.0 / bpm * 4 / quantize if quantize else 0
 
-    best = {}  # (lane, time) -> (time, velocity, open); merges e.g. open + closed hi-hat on the same hit
+    hits = []
     for inst in instruments:
         for n in inst.notes:
             lane = NOTE_TO_LANE.get(n.pitch)
-            if lane is None:
-                continue
-            t = round(n.start / step) * step if step else n.start
-            key = (lane, round(t / 0.02))  # notes on one lane within 20 ms are one hit
-            prev = best.get(key, (t, 0, False))
-            is_open = n.pitch in OPEN_HAT_NOTES or prev[2]
-            best[key] = (t, n.velocity, is_open) if n.velocity > prev[1] else (prev[0], prev[1], is_open)
-    notes = [(t, lane, v, is_open) for (lane, _), (t, v, is_open) in best.items()]
+            if lane is not None:
+                t = round(n.start / step) * step if step else n.start
+                hits.append((t, lane, n.velocity, n.pitch in OPEN_HAT_NOTES))
+    notes = merge_hits(hits)  # e.g. a closed + open hi-hat on the same hit
 
     meta = read_metadata(path)
     backing = path.parent / meta["backing"] if meta.get("backing") else None

@@ -10,6 +10,7 @@ ACCENT = "#ff7a59"
 GOOD = "#5be49b"
 WARN = "#ffd166"
 BAD = "#ff5d73"
+ON = "#7a4232"  # a switched-on toggle (with an ACCENT edge), clearly apart from an off one
 
 GRADE_COLORS = {"perfect": GOOD, "good": WARN, "ok": "#ffab5e", "miss": BAD, "extra": BAD}
 
@@ -24,9 +25,19 @@ QPushButton#nav {{
 }}
 QPushButton#nav:hover {{ background: {PANEL_2}; color: {TEXT}; }}
 QPushButton#nav:checked {{ background: {PANEL_2}; color: {TEXT}; font-weight: 600; }}
+QPushButton#status, QPushButton#status:disabled {{
+    text-align: left; padding: 4px 16px; border: none; background: transparent; color: {MUTED};
+}}
+QPushButton#status:hover:enabled {{ color: {TEXT}; }}
+QPushButton#level {{
+    text-align: left; padding: 8px 12px; border: 1px solid {BORDER}; border-radius: 8px; background: {PANEL};
+    color: {TEXT}; font-weight: 600;
+}}
+QPushButton#level:hover {{ border-color: {MUTED}; }}
 QLabel#h1 {{ font-size: 18pt; font-weight: 700; }}
 QLabel#h2 {{ font-size: 12pt; font-weight: 600; }}
 QLabel#muted, QLabel#hint {{ color: {MUTED}; }}
+QLabel#group {{ color: {MUTED}; font-size: 8.5pt; font-weight: 600; }}
 QFrame#card {{ background: {PANEL}; border: 1px solid {BORDER}; border-radius: 12px; }}
 QPushButton {{
     background: {PANEL_2}; border: 1px solid {BORDER}; border-radius: 8px; padding: 7px 14px;
@@ -35,7 +46,11 @@ QPushButton:hover {{ border-color: {MUTED}; }}
 QPushButton:disabled {{ color: {MUTED}; }}
 QPushButton#primary {{ background: {ACCENT}; border: none; color: #1a0f0b; font-weight: 700; padding: 8px 20px; }}
 QPushButton#primary:hover {{ background: #ff9274; }}
-QPushButton:checked {{ background: #3a3150; border-color: {ACCENT}; }}
+QPushButton#primary:disabled {{ background: {PANEL_2}; color: {MUTED}; border: 1px solid {BORDER}; }}
+QPushButton:checked {{
+    background: {ON}; border: 2px solid {ACCENT}; padding: 6px 13px; color: #ffffff;
+}}
+QPushButton:checked:hover {{ background: #8a4a36; }}
 QComboBox, QSpinBox, QDoubleSpinBox, QLineEdit {{
     background: {PANEL_2}; border: 1px solid {BORDER}; border-radius: 6px; padding: 5px 8px;
 }}
@@ -55,7 +70,10 @@ QHeaderView::section {{
 }}
 QScrollBar:vertical {{ background: transparent; width: 10px; }}
 QScrollBar::handle:vertical {{ background: {BORDER}; border-radius: 5px; min-height: 30px; }}
-QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; }}
+QScrollBar:horizontal {{ background: transparent; height: 10px; }}
+QScrollBar::handle:horizontal {{ background: {BORDER}; border-radius: 5px; min-width: 30px; }}
+QScrollBar::handle:hover {{ background: {MUTED}; }}
+QScrollBar::add-line, QScrollBar::sub-line {{ height: 0; width: 0; }}
 QScrollBar::add-page, QScrollBar::sub-page {{ background: transparent; }}
 QDialog {{ background: {BG}; }}
 QMenu {{ background: {PANEL_2}; border: 1px solid {BORDER}; padding: 4px; }}

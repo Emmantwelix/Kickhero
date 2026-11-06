@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow, QPushButton,
-                               QStackedWidget, QVBoxLayout, QWidget)
+                               QVBoxLayout, QWidget)
 
 from .engine.audio import AudioEngine
 from .kit.mapping import hat_open, load_kit, save_kit
@@ -20,6 +20,10 @@ from .progress import Progress
 from .settings import Settings
 from .ui import theme
 from .ui.course import CoursePage
+from .ui.drawing import icon
+from .ui.editor import EditorPage
+from .ui.fitting import PageStack
+from .ui.grooves import GroovesPage
 from .ui.kit_setup import KitPage
 from .ui.library import LibraryPage
 from .ui.practice import PracticePage
@@ -113,36 +117,45 @@ class MainWindow(QMainWindow):
         sl.setContentsMargins(0, 0, 0, 12)
         sl.setSpacing(2)
         sl.addWidget(QLabel("Kickhero", objectName="appname"))
-        self.stack = QStackedWidget()
+        self.stack = PageStack()
         self.library = LibraryPage(ctx)
         self.course = CoursePage(ctx)
+        self.grooves = GroovesPage(ctx)
         self.practice = PracticePage(ctx)
         self.kit = KitPage(ctx)
-        for page in (self.library, self.course, self.practice, self.kit):
+        self.editor = EditorPage(ctx)
+        for page in (self.library, self.course, self.grooves, self.practice, self.kit, self.editor):
             self.stack.addWidget(page)
 
         self.nav = QButtonGroup(self)
         self.nav_for = {}
-        for text, page in (("Songs", self.library), ("Course", self.course), ("My kit", self.kit)):
+        for text, page in (("Songs", self.library), ("Course", self.course), ("Groove Lab", self.grooves), ("My kit", self.kit)):
             b = QPushButton(text, objectName="nav", checkable=True)
             b.setFocusPolicy(Qt.NoFocus)
-            b.clicked.connect(lambda _=False, p=page: self.stack.setCurrentWidget(p))
+            b.clicked.connect(lambda _=False, p=page: self.go_to(p))
             self.nav.addButton(b)
             self.nav_for[page] = b
             sl.addWidget(b)
         self.nav_for[self.library].setChecked(True)
         sl.addStretch()
-        self.streak = QLabel(objectName="muted")
-        self.streak.setContentsMargins(16, 0, 16, 0)
+        self.streak = QPushButton(objectName="status")
+        self.streak.setEnabled(False)  # just a label (a button only to show the icon beside the text)
         sl.addWidget(self.streak)
-        self.device = QLabel(objectName="muted", wordWrap=True)
-        self.device.setContentsMargins(16, 0, 16, 0)
+        self.device = QPushButton(objectName="status")
+        self.device.setCursor(Qt.PointingHandCursor)
+        self.device.setFocusPolicy(Qt.NoFocus)
+        self.device.clicked.connect(lambda: self.go_to(self.kit))
         sl.addWidget(self.device)
         h.addWidget(side)
         h.addWidget(self.stack, 1)
 
         self.library.practise.connect(self.open_lesson)
+        self.library.edit.connect(self.open_editor)
+        self.editor.back.connect(lambda: self.go_to(self.library))
+        self.editor.practise.connect(self.open_lesson)
+        self.editor.saved.connect(self._song_saved)
         self.course.play.connect(self.open_course_lesson)
+        self.grooves.play.connect(self.open_course_lesson)
         self.practice.back.connect(self._back_from_practice)
         self.practice.next_course_lesson.connect(self._next_course_lesson)
         ctx.lane_hit.connect(self._lane_hit)
@@ -153,26 +166,52 @@ class MainWindow(QMainWindow):
         if ctx.audio.error:
             self.statusBar().showMessage(f"No sound output: {ctx.audio.error}")
 
+    def go_to(self, page):
+        """Switch page from the sidebar (asks first when leaving the editor with unsaved edits)."""
+        if self.stack.currentWidget() is self.editor and page is not self.editor and not self.editor.confirm_leave():
+            self.nav_for[self.library].setChecked(True)
+            return
+        self.stack.setCurrentWidget(page)
+        if page in self.nav_for:
+            self.nav_for[page].setChecked(True)
+
+    def open_editor(self, path):
+        self.editor.load(path)
+        self.stack.setCurrentWidget(self.editor)
+        self.nav_for[self.library].setChecked(True)
+
+    def _song_saved(self, path):
+        self.library.refresh()
+        if self.practice.path == path:
+            self.practice.load(path)
+
     def open_lesson(self, path):
         self.practice.load(path)
         self.stack.setCurrentWidget(self.practice)
+        self.nav_for[self.library].setChecked(True)  # the sidebar shows where you came from
         self.practice.setFocus()
 
     def open_course_lesson(self, lesson):
         self.practice.load_course_lesson(lesson)
         self.stack.setCurrentWidget(self.practice)
+        self.nav_for[self._lesson_page(lesson)].setChecked(True)
         self.practice.setFocus()
 
     def _next_course_lesson(self):
         current = self.practice.course_lesson
-        nxt = self.course.lesson_after(current) if current else None
+        nxt = self._lesson_page(current).lesson_after(current) if current else None
         if nxt:
             self.open_course_lesson(nxt)
         else:
             self._back_from_practice()
 
+    def _lesson_page(self, lesson):
+        """The page a course lesson or groove was opened from."""
+        return self.grooves if lesson.key.startswith("groove:") else self.course
+
     def _back_from_practice(self):
-        page = self.course if self.practice.course_lesson else self.library
+        current = self.practice.course_lesson
+        page = self._lesson_page(current) if current else self.library
         self.stack.setCurrentWidget(page)
         self.nav_for[page].setChecked(True)
         self._show_streak()
@@ -182,14 +221,22 @@ class MainWindow(QMainWindow):
             self.practice.on_hit(lane, velocity, perf, opened)
 
     def _show_device(self, name):
-        self.device.setText(f"🥁  {name}" if name else "No kit connected")
+        """The kit in use (green dot) or none (red); click it for My kit."""
+        self.device.setIcon(QIcon(icon("dot", theme.GOOD if name else theme.BAD, 14)))
+        self.device.setText(name or "No kit connected")
+        self.device.setToolTip(("Connected: " + name if name else "No kit found") + ". Click for My kit.")
 
     def _show_streak(self):
         n = self.ctx.progress.streak()
-        self.streak.setText(f"🔥  {n}-day streak" if n else "")
+        self.streak.setVisible(bool(n))
+        flame = QIcon()
+        for mode in (QIcon.Normal, QIcon.Disabled):  # a label-like (disabled) button would grey the icon
+            flame.addPixmap(icon("flame", theme.ACCENT, 14), mode)
+        self.streak.setIcon(flame)
+        self.streak.setText(f"{n}-day streak")
 
     def closeEvent(self, e):
-        if not self.library.confirm_close():
+        if not self.library.confirm_close() or not self.editor.confirm_leave():
             e.ignore()
             return
         self.ctx.audio.stop()

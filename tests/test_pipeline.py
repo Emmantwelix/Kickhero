@@ -70,3 +70,23 @@ def test_progress_best_and_streak(tmp_path):
     assert p.best("song.mid")[:2] == (3, 0.97)
     assert p.streak(today) == 3
     assert p.best("other.mid") is None
+
+
+def test_hits_are_placed_where_they_rise_not_in_the_quiet_before():
+    import numpy as np
+
+    from kickhero.pipeline.drums2midi import detect_hits
+
+    sr = 44100
+    rng = np.random.default_rng(0)
+    y = rng.normal(0, 0.01, sr * 4)                       # bleed under the hits
+    times = [0.5, 1.0, 1.31, 1.5, 2.25, 3.0]
+    for t in times:
+        k = np.arange(int(0.2 * sr))
+        hit = np.exp(-k / (0.05 * sr)) * rng.normal(0, 1, len(k))
+        hit[:88] *= np.linspace(0, 1, 88)                 # 2 ms attack
+        s = int(t * sr)
+        y[s:s + len(k)] += hit
+    found = detect_hits(y, sr, 0.07, -30, 30)[0]
+    assert len(found) == len(times)
+    assert np.abs(found - times).max() < 0.006

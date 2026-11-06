@@ -4,14 +4,19 @@ import os
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayout, QHeaderView, QLabel, QMenu,
                                QMessageBox, QProgressBar, QPushButton, QTableWidget, QTableWidgetItem, QVBoxLayout,
                                QWidget)
 
+from ..engine.editing import is_backup
 from ..engine.lesson import load_midi, read_metadata
 from ..pipeline.song2drums import DEFAULT_MODEL_DIR, SONG_EXTS
 from ..pipeline.worker import ConvertJob
+from . import theme
 from .convert_settings import ConvertSettingsDialog
+from .drawing import icon
+from .fitting import ElidedLabel
 
 
 def song_files(paths):
@@ -26,6 +31,7 @@ def song_files(paths):
 
 class LibraryPage(QWidget):
     practise = Signal(object)  # Path of the MIDI file
+    edit = Signal(object)      # Path of the MIDI file
 
     def __init__(self, ctx, parent=None):
         super().__init__(parent)
@@ -41,7 +47,7 @@ class LibraryPage(QWidget):
         head = QHBoxLayout()
         title = QVBoxLayout()
         title.addWidget(QLabel("Songs", objectName="h1"))
-        self.subtitle = QLabel(objectName="muted")
+        self.subtitle = ElidedLabel(objectName="muted")
         title.addWidget(self.subtitle)
         head.addLayout(title)
         head.addStretch()
@@ -51,10 +57,13 @@ class LibraryPage(QWidget):
         settings.clicked.connect(self.edit_settings)
         folder = QPushButton("Open folder")
         folder.clicked.connect(self.open_folder)
+        edit = QPushButton("Edit")
+        edit.setToolTip("Fix the drum part: add, move or delete notes, dynamics, tempo and bar 1")
+        edit.clicked.connect(lambda: self._selected_path() and self.edit.emit(self._selected_path()))
         self.go = QPushButton("Practise  ▶")
         self.go.setObjectName("primary")
         self.go.clicked.connect(self._practise_selected)
-        for b in (add, settings, folder, self.go):
+        for b in (add, settings, folder, edit, self.go):
             head.addWidget(b)
         lay.addLayout(head)
 
@@ -103,7 +112,7 @@ class LibraryPage(QWidget):
 
     def refresh(self):
         folder = self.ctx.settings.library_dir
-        files = sorted(Path(folder).rglob("*.mid")) if Path(folder).is_dir() else []
+        files = sorted(f for f in Path(folder).rglob("*.mid") if not is_backup(f)) if Path(folder).is_dir() else []
         selected = self._selected_path()
         self.paths = []
         self.table.setRowCount(0)
@@ -119,13 +128,16 @@ class LibraryPage(QWidget):
             diff = lesson.difficulty()
             cells = [lesson.title, f"{lesson.bpm:.0f} BPM", f"{mins}:{secs:02d}",
                      "●" * ((diff + 1) // 2) + "○" * (5 - (diff + 1) // 2),
-                     "♫" if lesson.backing else "",
+                     "Yes" if lesson.backing else "-",
                      ("★" * best[0] + "☆" * (3 - best[0]) + f"  {best[1] * 100:.0f}%") if best else "-"]
             for c, text in enumerate(cells):
                 item = QTableWidgetItem(text)
                 if c:
                     item.setTextAlignment(Qt.AlignCenter)
-                if c == 4 and not lesson.backing:
+                if c == 4 and lesson.backing:
+                    item.setIcon(QIcon(icon("note", theme.TEXT, 14)))
+                    item.setToolTip("Play along with the song itself (its drums taken out)")
+                elif c == 4:
                     item.setToolTip("Convert this song again to add the play-along track")
                 self.table.setItem(r, c, item)
             self.paths.append(f)
@@ -155,6 +167,7 @@ class LibraryPage(QWidget):
         source = meta.get("source")
         menu = QMenu(self)
         menu.addAction("Practise", lambda: self.practise.emit(path))
+        menu.addAction("Edit drum part...", lambda: self.edit.emit(path))
         if source and Path(source).exists():
             menu.addAction("Convert again (fix the tempo, missing or extra notes)...",
                            lambda: self.convert([source], detected_bpm=meta.get("bpm")))

@@ -18,10 +18,17 @@ tap-along test measures your setup's delay. No kit? Play with the computer keybo
   practise one limb, hear the drum part, results with stars and timing advice.
 - **Beginner course**: 32 lessons in 9 units (keeping time, rock beats, kick variations, sixteenths,
   cymbals, fills, rudiments, ghost notes, open hi-hat), unlocked one by one.
-- **Dynamics**: accents (tall notes with an accent mark) and ghost notes (small hollow notes) are shown
+- **Groove Lab**: practise real grooves and fills from a groove library installed on your computer
+  (a folder with `metadata.json`, `midi/` and `keymaps/`), in 5 levels from easiest to hardest. Filter by
+  grooves or fills, 4/4 or odd time, and density. The grooves aren't included with Kickhero; they're read
+  from where the library is installed.
+- **Dynamics**: accents (a white edge and the > sign inside) and ghost notes (hollow) are shown
   and rated against your own normal playing level, so it works with any kit's velocity response.
 - **Open hi-hat**: open hi-hats are marked with a circle and get their own sound. With a hi-hat pedal
   (the kit sends the open note or the pedal position), opening and closing is rated too.
+- **Edit the drum part**: fix a converted song on a drum grid. Add, move, delete and copy notes, change a
+  note's drum, accents, ghost notes and open hi-hats, fix the tempo or where bar 1 starts, and play it back
+  with the song. Saving keeps the converter's version, so you can revert any time.
 - **Any kit**: pad setup wizard, latency calibration, and drum sounds from the app: three built-in kits
   (Classic, 808, Tight) or your own samples, picked per drum or matched from a kit folder.
 
@@ -73,7 +80,7 @@ kickhero/
   kit/             MIDI input, pad mapping, latency calibration
   engine/          lessons, scoring, practice session (transport/loop/wait mode), audio
   course/          the beginner course: beginner.json (lessons as drum patterns) + loader
-  ui/              pages: songs, course, practice (scrolling lanes), my kit
+  ui/              pages: songs, course, groove lab, practice (scrolling lanes), my kit
 tests/             pytest
 ```
 

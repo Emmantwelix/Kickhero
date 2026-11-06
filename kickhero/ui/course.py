@@ -6,6 +6,7 @@ from PySide6.QtWidgets import (QCheckBox, QFrame, QGridLayout, QHBoxLayout, QLab
 
 from ..course import all_lessons, load_course, next_lesson, unlocked
 from . import theme
+from .drawing import icon
 
 
 class LessonCard(QPushButton):
@@ -18,27 +19,46 @@ class LessonCard(QPushButton):
         lay = QVBoxLayout(self)
         lay.setContentsMargins(14, 10, 14, 10)
         lay.setSpacing(2)
+        top = QHBoxLayout()
+        top.setSpacing(5)
         self.num = QLabel(objectName="muted")
+        self.state_icon = QLabel()
+        self.state_text = QLabel()
+        top.addWidget(self.num)
+        top.addStretch()
+        top.addWidget(self.state_icon)
+        top.addWidget(self.state_text)
+        lay.addLayout(top)
         self.title = QLabel(lesson.title, wordWrap=True)
-        self.title.setStyleSheet("font-weight: 600; background: transparent;")
         self.meta = QLabel(objectName="muted")
-        for w in (self.num, self.title, self.meta):
+        lay.addWidget(self.title)
+        lay.addWidget(self.meta)
+        for w in (self.num, self.state_icon, self.state_text, self.title, self.meta):
             w.setAttribute(Qt.WA_TransparentForMouseEvents)
-            lay.addWidget(w)
 
     def set_state(self, best, is_unlocked, passed):
+        """Passed: a check and "Passed" (not only the green edge); locked: a lock, and the card dimmed."""
         stars = best[0] if best else 0
-        self.num.setText(f"Lesson {self.lesson.number}" + ("   🔒" if not is_unlocked else ""))
+        self.num.setText(getattr(self.lesson, "heading", None) or f"Lesson {self.lesson.number}")
         self.meta.setText(f"{self.lesson.bpm:.0f} BPM    " + ("★" * stars + "☆" * (3 - stars) if best else ""))
+        state = ("check", theme.GOOD, "Passed") if passed else ("lock", theme.MUTED, "Locked") if not is_unlocked \
+            else None
+        self.state_icon.setVisible(state is not None)
+        self.state_text.setVisible(state is not None)
+        if state:
+            self.state_icon.setPixmap(icon(state[0], state[1], 14))
+            self.state_text.setText(state[2])
+            self.state_text.setStyleSheet(f"color: {state[1]}; font-size: 9pt; font-weight: 600;")
         self.setEnabled(is_unlocked)
         border = theme.GOOD if passed else theme.BORDER
         self.setStyleSheet(f"""
             LessonCard {{ background: {theme.PANEL}; border: 1px solid {border}; border-radius: 12px;
                           text-align: left; }}
             LessonCard:hover {{ border-color: {theme.ACCENT}; }}
-            LessonCard:disabled {{ background: {theme.BG}; }}
+            LessonCard:disabled {{ background: {theme.BG}; border-style: dashed; }}
             QLabel {{ background: transparent; }}""")
-        self.meta.setStyleSheet(f"color: {theme.WARN if best else theme.MUTED}; background: transparent;")
+        self.title.setStyleSheet(f"font-weight: 600; color: {theme.TEXT if is_unlocked else theme.MUTED};")
+        self.meta.setStyleSheet(f"color: {theme.WARN if best else theme.MUTED};")
 
 
 class CoursePage(QWidget):
@@ -135,3 +155,4 @@ class CoursePage(QWidget):
     def showEvent(self, e):
         self.refresh()
         super().showEvent(e)
+

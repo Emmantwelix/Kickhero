@@ -2,15 +2,18 @@
 
 import time
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout,
-                               QWidget)
+from PySide6.QtCore import QPoint, Qt, QTimer, Signal
+from PySide6.QtGui import QIcon
+from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSlider,
+                               QVBoxLayout, QWidget)
 
 from ..engine.lesson import load_midi
 from ..engine.session import Session
 from ..lanes import LANE_NAMES
 from . import theme
+from .drawing import icon
 from .highway import Highway
+from .fitting import ElidedLabel, FlowRow
 
 # Play without a kit: keyboard keys as pads
 KEY_LANES = {
@@ -30,6 +33,67 @@ def toggle(text, checked=False, tip=""):
     b.setToolTip(tip)
     b.setFocusPolicy(Qt.NoFocus)
     return b
+
+
+LEAD_W = 128    # Start and the back button: the same width, so the song title lines up above Speed
+TOOL_GAP = 8    # between toolbar items
+GROUP_GAP = 16  # extra space between toolbar groups
+
+
+def group(title, *widgets):
+    """A labelled group of controls that stays on one line when the toolbar wraps."""
+    box = QWidget()
+    lay = QHBoxLayout(box)
+    lay.setContentsMargins(0, 0, 0, 0)
+    lay.setSpacing(6)
+    label = QLabel(title, objectName="group")
+    lay.addWidget(label)
+    lay.addSpacing(2)
+    for w in widgets:
+        lay.addWidget(w)
+    return box
+
+
+class SpeedPopup(QFrame):
+    """A slider for any speed (30-150%, in 5% steps), opened from the gear after the speed buttons."""
+
+    changed = Signal(float)
+
+    def __init__(self, speed, parent=None):
+        super().__init__(parent, Qt.Popup)
+        self.setObjectName("card")
+        self.setAttribute(Qt.WA_DeleteOnClose)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(16, 12, 16, 12)
+        lay.setSpacing(8)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Speed", objectName="group"))
+        row.addStretch()
+        self.value = QLabel()
+        self.value.setStyleSheet("font-weight: 600;")
+        row.addWidget(self.value)
+        lay.addLayout(row)
+        self.slider = QSlider(Qt.Horizontal)
+        self.slider.setRange(6, 30)  # x 5% = 30% .. 150%
+        self.slider.setPageStep(1)
+        self.slider.setFixedWidth(260)
+        self.slider.setValue(round(speed * 20))
+        self.slider.valueChanged.connect(self._moved)
+        lay.addWidget(self.slider)
+        ends = QHBoxLayout()
+        for text in ("30%", "100%", "150%"):
+            ends.addWidget(QLabel(text, objectName="muted"))
+            if text != "150%":
+                ends.addStretch()
+        lay.addLayout(ends)
+        self._show(self.slider.value())
+
+    def _show(self, v):
+        self.value.setText(f"{v * 5}%")
+
+    def _moved(self, v):
+        self._show(v)
+        self.changed.emit(v / 20)
 
 
 class ResultsPanel(QFrame):
@@ -91,7 +155,7 @@ class ResultsPanel(QFrame):
         if d:
             msg = f"Dynamics: {d['score'] * 100:.0f}% right."
             if d["too_soft"] >= max(1, d["too_loud"]):
-                msg += " Make the accents (tall notes) clearly louder than the rest."
+                msg += " Make the accents (notes with the > sign) clearly louder than the rest."
             elif d["too_loud"]:
                 msg += " Play the ghost notes (small notes) much softer, barely touching the drum."
             tips.append(msg)
@@ -142,38 +206,46 @@ class PracticePage(QWidget):
         root.setSpacing(10)
 
         top = QHBoxLayout()
+        top.setSpacing(0)
         back = self.back_btn = QPushButton("←  Songs")
         back.setFocusPolicy(Qt.NoFocus)
+        back.setFixedWidth(LEAD_W)
         back.clicked.connect(self._go_back)
-        self.title = QLabel(objectName="h2")
-        self.info = QLabel(objectName="muted")
+        self.title = ElidedLabel(objectName="h2")
+        self.info = ElidedLabel(objectName="muted")
         top.addWidget(back)
-        top.addSpacing(10)
+        top.addSpacing(GROUP_GAP + 2 * TOOL_GAP)  # the same gap as Start -> Speed below, so the title sits above it
         top.addWidget(self.title)
-        top.addSpacing(10)
+        top.addSpacing(14)
         top.addWidget(self.info)
-        top.addStretch()
+        top.addStretch(1)
         root.addLayout(top)
 
-        bar = QHBoxLayout()
-        bar.setSpacing(8)
+        bar = FlowRow(spacing=TOOL_GAP)
         self.play_btn = QPushButton("▶  Start")
         self.play_btn.setObjectName("primary")
+        self.play_btn.setFixedWidth(LEAD_W)
         self.play_btn.setFocusPolicy(Qt.NoFocus)
         self.play_btn.clicked.connect(self.toggle_play)
         bar.addWidget(self.play_btn)
-        bar.addSpacing(12)
-        bar.addWidget(QLabel("Speed"))
+        bar.addSpacing(GROUP_GAP)
         self.speed_group = QButtonGroup(self)
         self.speed_group.setExclusive(True)
+        speeds = []
         for i, (name, value) in enumerate(SPEEDS):
             b = toggle(name, tip=f"{value * 100:.0f}% speed  (key {i + 1})")
             self.speed_group.addButton(b, i)
-            bar.addWidget(b)
+            speeds.append(b)
+        self.speed_more = QPushButton()
+        self.speed_more.setIcon(QIcon(icon("gear", theme.TEXT, 16)))
+        self.speed_more.setToolTip("Any speed: a slider from 30% to 150%")
+        self.speed_more.setCheckable(True)  # shown "on" while the speed is not one of the four buttons
+        self.speed_more.setFocusPolicy(Qt.NoFocus)
+        self.speed_more.clicked.connect(self._speed_popup)
+        speed_box = group("Speed", *speeds, self.speed_more)
         self.speed_group.idClicked.connect(lambda i: self.set_speed(SPEEDS[i][1]))
         self.speed = 0.75
         self.speed_group.button(1).setChecked(True)
-        bar.addSpacing(12)
         self.loop_btn = toggle("Loop", tip="Repeat the song, or the bars you drag-select on the strip above the lanes")
         self.auto_btn = toggle("Auto speed-up", tip="While looping: move up to the next speed (Slow → Medium → Normal) after every pass of 90% or better")
         self.wait_btn = toggle("Wait for me", tip="The music stops at each note until you hit it. No timing pressure.")
@@ -181,11 +253,8 @@ class PracticePage(QWidget):
         self.guide_btn = toggle("Hear the part", tip="The app plays the drum part too, so you can hear how it goes")
         self.song_btn = toggle("Song", True, tip="Play the song without its drums, so you are the drummer "
                                                  "(plays at 100% speed only)")
-        self.dyn_btn = toggle("Rate dynamics", tip="Score how hard you hit: accents (tall notes) louder than normal, "
-                                                   "ghost notes (small hollow notes) softer")
-        for b in (self.loop_btn, self.auto_btn, self.wait_btn, self.metro_btn, self.guide_btn, self.song_btn,
-                  self.dyn_btn):
-            bar.addWidget(b)
+        self.dyn_btn = toggle("Rate dynamics", tip="Score how hard you hit: accents (notes with the > sign) louder than normal, "
+                                                   "ghost notes (hollow notes) softer")
         self.loop_btn.toggled.connect(self._restart_if_running)
         self.auto_btn.toggled.connect(self._restart_if_running)
         self.wait_btn.toggled.connect(self._restart_if_running)
@@ -193,15 +262,27 @@ class PracticePage(QWidget):
         self.guide_btn.toggled.connect(lambda on: setattr(ctx.audio, "guide_all", on))
         self.song_btn.toggled.connect(lambda on: setattr(ctx.audio, "backing_on", on))
         self.dyn_btn.toggled.connect(self._restart_if_running)
-        bar.addStretch()
         self.timing = QComboBox()
-        self.timing.addItems(["Clean timing (snapped to 1/16)", "Original feel"])
+        self.timing.addItems(["Snapped to 1/16", "Original feel"])
         self.timing.setFocusPolicy(Qt.NoFocus)
         self.timing.setToolTip("Clean timing is easier to learn from; original feel keeps the drummer's groove")
         self.timing.currentIndexChanged.connect(lambda _: self.path and self.load(self.path))
         self.timing.setVisible(False)
-        bar.addWidget(self.timing)
-        root.addLayout(bar)
+        self.scoring = group("Scoring", self.dyn_btn, self.timing)
+        # Start | Speed | Sound | Scoring | Practice. Speed and Sound are one widget, so a narrow window
+        # wraps them together; Scoring follows Sound
+        speed_sound = QWidget()
+        pair = QHBoxLayout(speed_sound)
+        pair.setContentsMargins(0, 0, 0, 0)
+        pair.setSpacing(GROUP_GAP + 2 * TOOL_GAP)
+        pair.addWidget(speed_box)
+        pair.addWidget(group("Sound", self.metro_btn, self.guide_btn, self.song_btn))
+        bar.addWidget(speed_sound)
+        bar.addSpacing(GROUP_GAP)
+        bar.addWidget(self.scoring)
+        bar.addSpacing(GROUP_GAP)
+        bar.addWidget(group("Practice", self.loop_btn, self.auto_btn, self.wait_btn))
+        root.addWidget(bar)
 
         self.highway = Highway()
         self.highway.loop_selected.connect(self._loop_selected)
@@ -234,6 +315,7 @@ class PracticePage(QWidget):
         self.path, self.course_lesson = path, None
         self._set_lesson(load_midi(path, quantize=16 if self.timing.currentIndex() == 0 else 0))
         self.timing.show()
+        self.scoring.show()
         self.back_btn.setText("←  Songs")
 
     def load_course_lesson(self, course_lesson):
@@ -241,7 +323,8 @@ class PracticePage(QWidget):
         self.set_speed(1.0)
         self._set_lesson(course_lesson.to_lesson())
         self.timing.hide()
-        self.back_btn.setText("←  Course")
+        self.scoring.setVisible(self.lesson.has_dynamics)
+        self.back_btn.setText("←  " + ("Groove Lab" if course_lesson.key.startswith("groove:") else "Course"))
         self.highway.status = self._idle_text()
 
     def _idle_text(self):
@@ -258,6 +341,7 @@ class PracticePage(QWidget):
         self.lesson = lesson
         self.lanes = set(self.lesson.lanes_used)
         self.loop_bars = None
+        self.highway.preview_from = 0.0
         self.highway.active_lanes = self.lanes
         self.ctx.audio.muted.clear()
         self.highway.muted = self.ctx.audio.muted
@@ -272,10 +356,11 @@ class PracticePage(QWidget):
             self.ctx.audio.load_backing(None, 0)
         self.song_btn.setVisible(self.lesson.backing is not None)
         self._update_song_hint()
-        # Course lessons rate dynamics by default; converted songs' dynamics are only approximate
+        # Course lessons rate dynamics by default; converted songs' (and grooves') dynamics are only a guide
         self.dyn_btn.setVisible(self.lesson.has_dynamics)
         self.dyn_btn.blockSignals(True)
-        self.dyn_btn.setChecked(self.lesson.has_dynamics and self.course_lesson is not None)
+        self.dyn_btn.setChecked(self.lesson.has_dynamics and self.course_lesson is not None
+                                and getattr(self.course_lesson, "rate_dynamics", True))
         self.dyn_btn.blockSignals(False)
         self.highway.status = self._idle_text()
         self.results.hide()
@@ -410,13 +495,26 @@ class PracticePage(QWidget):
             self.session.set_speed(value, time.perf_counter())
 
     def _show_speed(self, value):
-        """Light up the button for this speed (none if auto speed-up landed between presets)."""
+        """Light up the button for this speed; any other speed (the slider, or auto speed-up between
+        presets) lights the gear button, which then shows the percentage."""
         self.speed = value
         self.speed_group.setExclusive(False)
+        preset = False
         for i, (_, v) in enumerate(SPEEDS):
-            self.speed_group.button(i).setChecked(abs(v - value) < 1e-3)
+            on = abs(v - value) < 1e-3
+            self.speed_group.button(i).setChecked(on)
+            preset |= on
         self.speed_group.setExclusive(True)
+        self.speed_more.setChecked(not preset)
+        self.speed_more.setText("" if preset else f" {value * 100:.0f}%")
         self._update_song_hint()
+
+    def _speed_popup(self):
+        self.speed_more.setChecked(not any(abs(v - self.speed) < 1e-3 for _, v in SPEEDS))  # a click toggles it
+        popup = SpeedPopup(self.speed, self)
+        popup.changed.connect(self.set_speed)
+        popup.move(self.speed_more.mapToGlobal(self.speed_more.rect().bottomLeft()) + QPoint(0, 6))
+        popup.show()
 
     def _slower(self):
         return max([v for _, v in SPEEDS if v < self.speed - 1e-3], default=SPEEDS[0][1])
@@ -427,11 +525,13 @@ class PracticePage(QWidget):
 
     def _loop_selected(self, a, b):
         self.loop_bars = (a, b)
+        self.highway.preview_from = a * self.lesson.bar
         self.loop_btn.setChecked(True)   # restarts if running
         self._restart_if_running()
 
     def _loop_cleared(self):
         self.loop_bars = None
+        self.highway.preview_from = 0.0
         self._restart_if_running()
         self.highway.update()
 

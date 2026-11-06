@@ -56,6 +56,22 @@ def match_piece(filename, overrides):
     return _match_text(name, overrides)
 
 
+def attack_start(y, sr, s, ahead_ms=60.0, back_ms=10.0):
+    """Where the hit found near sample s actually rises: a quarter of the way up from the quiet
+    before it to its peak.
+
+    Backtracking alone goes to the quietest point before an onset, which in a separated stem
+    (smeared transients, bleed, the previous hit's tail) is often tens of ms early; and onset
+    frames are ~6 ms apart, so the search starts a little before s."""
+    a = max(0, s - int(back_ms / 1000 * sr))
+    seg = np.abs(y[a:s + int(ahead_ms / 1000 * sr)])
+    if seg.size == 0 or seg.max() == 0:
+        return s
+    floor = seg[:max(1, int(0.002 * sr))].max()
+    env = np.maximum.accumulate(seg)
+    return a + int(np.argmax(env >= floor + 0.25 * (env[-1] - floor)))
+
+
 def detect_hits(y, sr, sensitivity, gate_db, min_gap_ms, ref_peak=None, ref_gate_db=-36.0):
     """Return (onset_times, peak_dB_relative_to_loudest_hit, onset_samples, peak_dB_relative_to_ref).
 
@@ -72,6 +88,7 @@ def detect_hits(y, sr, sensitivity, gate_db, min_gap_ms, ref_peak=None, ref_gate
         backtrack=True, delta=sensitivity, units="frames",
     )
     onset_samples = np.clip(librosa.frames_to_samples(onset_frames, hop_length=hop) - pad, 0, None)
+    onset_samples = np.array([attack_start(y, sr, s) for s in onset_samples], dtype=int)
 
     # Peak level in the first 50 ms after each onset
     win = int(0.05 * sr)
