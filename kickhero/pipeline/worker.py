@@ -15,6 +15,7 @@ from ..settings import REPO_ROOT
 
 STEP_NAMES = {1: "Separating the drums from the song", 2: "Splitting the kit", 3: "Finding the tempo",
               4: "Writing the drum part"}
+MIDI_STEP_NAMES = {1: STEP_NAMES[1], 2: "Lining up the MIDI file"}  # with a ready-made MIDI file
 
 # Conversion options (stored in settings["convert"]) -> song2drums.py flags
 DEFAULT_OPTIONS = {
@@ -37,6 +38,10 @@ def build_args(songs, output, options):
         args.append("--no-align")
     if not o["split_toms"]:
         args.append("--no-split-toms")
+    if o.get("midi"):  # per song, never stored in the settings
+        args += ["--midi", str(o["midi"])]
+    if o.get("name"):
+        args += ["--name", str(o["name"])]
     return args
 
 
@@ -58,6 +63,8 @@ class ConvertJob(QObject):
         self.songs = list(songs)
         self.total = len(self.songs)
         self.done = self.failed = self.step = 0
+        self.names = MIDI_STEP_NAMES if (options or {}).get("midi") else STEP_NAMES
+        self.slow = 1 if (options or {}).get("midi") else 2  # steps that take nearly all the time
         self.name = ""
         self._buf = ""
         self.proc = QProcess(self)
@@ -97,17 +104,17 @@ class ConvertJob(QObject):
             m = re.search(r"(\d+)%\|", line)
             if m and self.name:
                 pct = int(m.group(1))
-                self._status(f"{STEP_NAMES.get(self.step, 'Working')}... {pct}%")
-                if self.step in (1, 2):  # the two slow steps: count their progress
+                self._status(f"{self.names.get(self.step, 'Working')}... {pct}%")
+                if self.step <= self.slow:  # the slow steps: count their progress
                     self._fraction(self.step - 1 + pct / 100)
             return
         self.log.emit(line)
         if m := re.match(r"=== (.*) ===$", line):
             self.name, self.step = m.group(1), 0
             self._status("Starting...")
-        elif m := re.match(r"\[(\d)/4\]", line):
+        elif m := re.match(r"\[(\d)/\d\]", line):
             self.step = int(m.group(1))
-            self._status(STEP_NAMES[self.step] + "...")
+            self._status(self.names.get(self.step, "Working") + "...")
             self._fraction(self.step - 1)
         elif line.startswith("Done in"):
             self.done += 1
@@ -124,8 +131,8 @@ class ConvertJob(QObject):
         self.status.emit(f"Song {n} of {self.total}: {self.name}  -  {text}")
 
     def _fraction(self, steps_in_song, song_finished=False):
-        # steps 1 and 2 are ~95% of the time; weight the song as 2 units
-        per_song = 0.0 if song_finished else min(steps_in_song, 2) / 2
+        # the slow steps (1 and 2; 1 with a MIDI file) are ~95% of the time: only they count
+        per_song = 0.0 if song_finished else min(steps_in_song, self.slow) / self.slow
         self.fraction.emit(min(1.0, (self.done + per_song) / max(1, self.total)))
 
     def _finished(self, code, _status):

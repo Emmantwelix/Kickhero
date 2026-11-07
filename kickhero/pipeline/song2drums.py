@@ -12,6 +12,9 @@ For each song it:
   3. detects the tempo (unless you give --bpm)
   4. writes <song>_drums.mid via drums2midi.py
 
+With --midi FILE (one song), steps 2-4 are replaced by lining that MIDI file's drum part up with
+the song (see midi_import.py): a hand-made drum part, played along with the real track.
+
 Output goes to drum_midi/<song name>/ by default. Songs that already have a MIDI file
 are skipped, so re-running on a folder only processes new songs (use --force to redo).
 Models download once (~1 GB total) to ~/.cache/audio-separator-models.
@@ -110,7 +113,7 @@ def detect_bpm(wav_path):
 
 
 def process_song(song, args):
-    name = song.stem
+    name = getattr(args, "name", None) or song.stem
     song_dir = Path(args.output) / name
     midi_path = song_dir / f"{name}_drums.mid"
     if midi_path.exists() and not args.force:
@@ -124,7 +127,8 @@ def process_song(song, args):
         d.mkdir(parents=True)
 
     t0 = time.time()
-    print("[1/4] Extracting drums from the mix...")
+    steps = 2 if args.midi else 4
+    print(f"[1/{steps}] Extracting drums from the mix...")
     outs = separate(DRUMS_MODEL, song, work, args.model_dir)
     drum_files = [f for f in outs if stem_name(f) == "drums"]
     if not drum_files:
@@ -133,6 +137,21 @@ def process_song(song, args):
     shutil.move(str(drum_files[0]), drums_wav)  # fixed name, so the song title never confuses step 4
     backing = song_dir / "backing.ogg"
     has_backing = write_backing([f for f in outs if f not in drum_files], backing)
+
+    if args.midi:
+        from .midi_import import import_aligned
+
+        print("[2/2] Lining up the MIDI file with the song...")
+        _, (rate, off) = import_aligned(args.midi, drums_wav, song_dir, name, backing=backing.name if has_backing else None,
+                                 source=str(Path(song).resolve()))
+        print(f"{rate:.0%} of the MIDI's kick and snare notes line up with drums heard in the song "
+              f"({off:.0%} a beat off)")
+        shutil.rmtree(work, ignore_errors=True)
+        shutil.rmtree(kit_dir, ignore_errors=True)
+        if not args.keep_stems:
+            drums_wav.unlink(missing_ok=True)
+        print(f"Done in {time.time() - t0:.0f}s -> {midi_path}")
+        return
 
     print("[2/4] Splitting the kit (kick, snare, toms, hh, ride, crash)...")
     separate(KIT_MODEL, drums_wav, kit_dir, args.model_dir)
@@ -222,6 +241,9 @@ def build_parser():
     p.add_argument("--force", action="store_true", help="Redo songs that already have a MIDI file")
     p.add_argument("--watch", action="store_true", help="Keep running and process new songs as they appear")
     p.add_argument("--model-dir", default=str(DEFAULT_MODEL_DIR), help="Where models are cached")
+    p.add_argument("--midi", help="A ready-made MIDI file of the song: line its drum part up with the song "
+                                  "instead of transcribing the drums (one song only)")
+    p.add_argument("--name", help="Song name (and folder) to use instead of the file name (one song only)")
     # Pass-through tuning for drums2midi
     p.add_argument("--sensitivity", type=float, default=0.07)
     p.add_argument("--gate", type=float, default=-30.0)
@@ -239,6 +261,8 @@ def build_parser():
 
 def main():
     args = build_parser().parse_args()
+    if (args.midi or args.name) and (len(args.inputs) != 1 or not Path(args.inputs[0]).is_file()):
+        raise SystemExit("--midi and --name go with exactly one song file")
 
     Path(args.model_dir).mkdir(parents=True, exist_ok=True)
     run_all(args)

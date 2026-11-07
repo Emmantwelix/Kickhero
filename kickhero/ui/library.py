@@ -1,6 +1,7 @@
 """Songs page: add songs (they're converted in the background) and pick one to practise."""
 
 import os
+import re
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
@@ -11,12 +12,16 @@ from PySide6.QtWidgets import (QAbstractItemView, QFileDialog, QFrame, QHBoxLayo
 
 from ..engine.editing import is_backup
 from ..engine.lesson import load_midi, read_metadata
+from ..pipeline.midi_import import CLEAR_LEAD, MidiImportError, import_midi
 from ..pipeline.song2drums import DEFAULT_MODEL_DIR, SONG_EXTS
 from ..pipeline.worker import ConvertJob
 from . import theme
 from .convert_settings import ConvertSettingsDialog
 from .drawing import icon
 from .fitting import ElidedLabel
+from .midi_import import MidiImportDialog
+
+MIDI_EXTS = {".mid", ".midi"}
 
 
 def song_files(paths):
@@ -27,6 +32,10 @@ def song_files(paths):
         elif p.suffix.lower() in SONG_EXTS:
             out.append(p)
     return out
+
+
+def midi_files(paths):
+    return [p for p in map(Path, paths) if p.suffix.lower() in MIDI_EXTS and p.is_file()]
 
 
 class LibraryPage(QWidget):
@@ -53,6 +62,10 @@ class LibraryPage(QWidget):
         head.addStretch()
         add = QPushButton("+  Add songs...")
         add.clicked.connect(self.add_songs)
+        add_midi = QPushButton("+  Add MIDI file...")
+        add_midi.setToolTip("A ready-made MIDI file of a song (e.g. a downloaded one): its drum part, "
+                            "optionally lined up with the song itself")
+        add_midi.clicked.connect(self.add_midi)
         settings = QPushButton("Conversion settings")
         settings.clicked.connect(self.edit_settings)
         folder = QPushButton("Open folder")
@@ -63,7 +76,7 @@ class LibraryPage(QWidget):
         self.go = QPushButton("Practise  ▶")
         self.go.setObjectName("primary")
         self.go.clicked.connect(self._practise_selected)
-        for b in (add, settings, folder, edit, self.go):
+        for b in (add, add_midi, settings, folder, edit, self.go):
             head.addWidget(b)
         lay.addLayout(head)
 
@@ -142,9 +155,10 @@ class LibraryPage(QWidget):
                 self.table.setItem(r, c, item)
             self.paths.append(f)
         n = len(self.paths)
-        self.subtitle.setText(f"{n} song{'s' if n != 1 else ''}  ·  drag songs here, or click Add songs")
+        self.subtitle.setText(f"{n} song{'s' if n != 1 else ''}  ·  drag songs or MIDI files here, or click Add")
         self.empty.setText("" if n else "No songs yet. Click \"Add songs...\" or drag audio files (mp3, wav, flac...) "
-                                          "onto this window. Each song takes a few minutes to convert.")
+                                          "onto this window. Each song takes a few minutes to convert. "
+                                          "Have a MIDI file of a song? Click \"Add MIDI file...\".")
         self.empty.setVisible(not n)
         if n:
             self.table.selectRow(self.paths.index(selected) if selected in self.paths else 0)
@@ -194,12 +208,50 @@ class LibraryPage(QWidget):
         if files:
             self.convert(files)
 
+    def add_midi(self):
+        files, _ = QFileDialog.getOpenFileNames(self, "Add MIDI files", str(Path.home() / "Downloads"),
+                                                "MIDI files (*.mid *.midi);;All files (*.*)")
+        for f in files:
+            self.import_midi(f)
+
+    def import_midi(self, midi_path):
+        """Ask for a name and (optionally) the song's audio, then add the MIDI file's drum part."""
+        try:
+            dlg = MidiImportDialog(midi_path, self)
+        except MidiImportError as e:
+            QMessageBox.warning(self, "Can't use this MIDI file", f"{Path(midi_path).name}: {e}")
+            return
+        if not dlg.exec():
+            return
+        name, audio = dlg.song_name(), dlg.audio_path()
+        library = self.ctx.settings.library_dir
+        target = library / name / f"{name}_drums.mid"
+        if target.exists() and QMessageBox.question(
+                self, "Replace song?", f"\"{name}\" is already in your songs. Replace its drum part with this "
+                                      "MIDI file's?") != QMessageBox.Yes:
+            return
+        if audio:
+            self._start([audio], {"midi": str(midi_path), "name": name})
+            return
+        try:
+            path = import_midi(midi_path, library, name)
+        except (MidiImportError, OSError) as e:
+            QMessageBox.warning(self, "Can't use this MIDI file", str(e))
+            return
+        self.refresh()
+        if path in self.paths:
+            self.table.selectRow(self.paths.index(path))
+
     def dragEnterEvent(self, e):
-        if e.mimeData().hasUrls() and song_files(u.toLocalFile() for u in e.mimeData().urls()):
+        urls = [u.toLocalFile() for u in e.mimeData().urls()] if e.mimeData().hasUrls() else []
+        if song_files(urls) or midi_files(urls):
             e.acceptProposedAction()
 
     def dropEvent(self, e):
-        self.convert([u.toLocalFile() for u in e.mimeData().urls()])
+        urls = [u.toLocalFile() for u in e.mimeData().urls()]
+        for f in midi_files(urls):
+            self.import_midi(f)
+        self.convert([u for u in urls if Path(u).suffix.lower() not in MIDI_EXTS])
 
     def convert(self, paths, detected_bpm=None):
         """Ask how to convert the songs (tempo, fine-tuning), then convert them or queue them."""
@@ -225,8 +277,8 @@ class LibraryPage(QWidget):
         self.job.fraction.connect(lambda f: self.bar.setValue(int(f * 1000)))
         self.job.song_done.connect(lambda *_: self.refresh())
         self.job.finished.connect(self._job_finished)
-        self.job.log.connect(lambda line: setattr(self, "_last_log", line))
-        self._last_log = ""
+        self.job.log.connect(self._log_line)
+        self._last_log = self._match = ""
         first_time = not (Path(DEFAULT_MODEL_DIR) / "htdemucs_ft.yaml").exists()
         self.conv_note.setText("First conversion: downloading the separation models (about 1 GB, once only)..."
                                if first_time else "Each song takes a few minutes. You can keep practising meanwhile.")
@@ -234,6 +286,11 @@ class LibraryPage(QWidget):
         self.stop_btn.setEnabled(True)
         self.card.show()
         self.job.start()
+
+    def _log_line(self, line):
+        self._last_log = line
+        if "line up with drums heard in the song" in line:
+            self._match = line
 
     def stop_conversion(self):
         self.queue.clear()
@@ -255,7 +312,18 @@ class LibraryPage(QWidget):
         else:
             self.conv_status.setText(f"Finished: {ok} song{'s' if ok != 1 else ''} ready to practise.")
         self.bar.setValue(1000)
-        self.conv_note.setText("")
+        self.conv_note.setText(self._match_note())
+
+    def _match_note(self):
+        """After lining up a MIDI file: how well it fits the recording (a poor fit is usually another version)."""
+        m = re.match(r"(\d+)%.*\((\d+)%", self._match)
+        if not m:
+            return ""
+        pct, off = int(m.group(1)), int(m.group(2))
+        if pct - off >= CLEAR_LEAD * 100:
+            return f"The MIDI file lines up with the song: {pct}% of its kick and snare notes match the recording."
+        return ("The MIDI file doesn't line up clearly with the song. It may be a different version or "
+                "arrangement: check it in Practise, and fix it with Edit if needed.")
 
     def edit_settings(self):
         dlg = ConvertSettingsDialog(self.ctx.settings["convert"], self)

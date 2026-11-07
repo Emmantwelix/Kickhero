@@ -14,6 +14,10 @@ tap-along test measures your setup's delay. No kit? Play with the computer keybo
 
 - **Songs**: drag songs onto the window; they're converted in the background. Practise with the
   drumless song playing along.
+- **Songs from MIDI files**: have a MIDI file of a song (e.g. a downloaded transcription)? Add MIDI file keeps
+  its drum track. On its own it's ready at once (one steady tempo, no song audio); pick the song's audio file
+  too and the drums are taken out of the song and the MIDI's notes are lined up with the recording, so you
+  play the hand-made part along with the real track.
 - **Practice tools**: speed buttons (Slow 50%, Medium 75%, Normal, Max 125%), loop any bars, auto speed-up, "wait for me" mode, turn lanes off to
   practise one limb, hear the drum part, results with stars and timing advice.
 - **Beginner course**: 32 lessons in 9 units (keeping time, rock beats, kick variations, sixteenths,
@@ -67,6 +71,7 @@ builds the installer on GitHub Actions and attaches it to a release.
 
 ```bat
 env\Scripts\python song2drums.py path\to\songs      :: song(s) -> drum_midi\<song>\<song>_drums.mid
+env\Scripts\python song2drums.py song.mp3 --midi song.mid   :: a MIDI file's drum part, lined up with the song
 env\Scripts\python drums2midi.py stems_folder -o drums.mid
 env\Scripts\python -m pytest                          :: tests
 ```
@@ -76,7 +81,7 @@ env\Scripts\python -m pytest                          :: tests
 ```
 kickhero/
   app.py           main window and shared services
-  pipeline/        song -> stems -> drum MIDI (song2drums.py, drums2midi.py)
+  pipeline/        song -> stems -> drum MIDI (song2drums.py, drums2midi.py); MIDI files in (midi_import.py)
   kit/             MIDI input, pad mapping, latency calibration
   engine/          lessons, scoring, practice session (transport/loop/wait mode), audio
   course/          the beginner course: beginner.json (lessons as drum patterns) + loader
