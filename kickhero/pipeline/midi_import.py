@@ -8,6 +8,7 @@ slows down. Either way the song is written like a converted one: <name>/<name>_d
 """
 
 import datetime
+import io
 import json
 import math
 import re
@@ -42,6 +43,19 @@ def song_name(path):
     return re.sub(r"\s+", " ", stem).strip() or "Imported song"
 
 
+def unwrap_rmid(data):
+    """The standard MIDI file inside a RIFF MIDI (.rmi) file; other data is returned as it is. Some sites
+    serve their .mid downloads in this wrapper."""
+    if data[:4] == b"RIFF" and data[8:12] == b"RMID":
+        i = 12
+        while i + 8 <= len(data):
+            size = int.from_bytes(data[i + 4:i + 8], "little")
+            if data[i:i + 4] == b"data":
+                return data[i + 8:i + 8 + size]
+            i += 8 + size + (size & 1)
+    return data
+
+
 def read_drums(path):
     """The drum notes of a MIDI file. Returns (notes, info): notes are (seconds, beats, pitch, velocity)
     tuples (beats in quarter notes from the start of the file); info has the main tempo and whether the
@@ -49,7 +63,7 @@ def read_drums(path):
     import pretty_midi
 
     try:
-        pm = pretty_midi.PrettyMIDI(str(path))
+        pm = pretty_midi.PrettyMIDI(io.BytesIO(unwrap_rmid(Path(path).read_bytes())))
     except Exception as e:
         raise MidiImportError(f"This doesn't look like a MIDI file ({e}).") from e
     drums = [i for i in pm.instruments if i.is_drum]

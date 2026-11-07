@@ -154,7 +154,7 @@ class PassScorer:
         accuracy = max(0.0, points / n) if n else 1.0
         offsets = [j.offset for j in self.judged.values() if j.grade != "miss"]
         per_lane = {lane: lane_pts[lane] / lane_n[lane] for lane in lane_n}
-        stars = sum(accuracy >= s for s in STARS)
+        stars = sum(accuracy >= s for s in STARS) if n else 0  # no stars for a pass with nothing to play
         if rated:  # when dynamics are rated they limit the stars too: accents and ghosts are the point
             stars = min(stars, sum(dyn["ok"] / rated >= s for s in STARS))
         hats = sum(hat.values())

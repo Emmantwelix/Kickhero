@@ -255,7 +255,7 @@ class PracticePage(QWidget):
                                                  "(plays at 100% speed only)")
         self.dyn_btn = toggle("Rate dynamics", tip="Score how hard you hit: accents (notes with the > sign) louder than normal, "
                                                    "ghost notes (hollow notes) softer")
-        self.loop_btn.toggled.connect(self._restart_if_running)
+        self.loop_btn.toggled.connect(self._loop_toggled)
         self.auto_btn.toggled.connect(self._restart_if_running)
         self.wait_btn.toggled.connect(self._restart_if_running)
         self.metro_btn.toggled.connect(lambda on: setattr(ctx.audio, "metronome", on))
@@ -419,7 +419,8 @@ class PracticePage(QWidget):
                     self.stop()
                     self.highway.status = ""
                     speed = self.speed
-                    self.ctx.record_result(self.key, speed, ev[1])
+                    if ev[1]["notes"]:  # nothing to play (e.g. every drum turned off) isn't a result
+                        self.ctx.record_result(self.key, speed, ev[1])
                     status = None
                     if self.course_lesson:
                         full = speed >= 0.999
@@ -528,6 +529,12 @@ class PracticePage(QWidget):
         self.highway.preview_from = a * self.lesson.bar
         self.loop_btn.setChecked(True)   # restarts if running
         self._restart_if_running()
+
+    def _loop_toggled(self, on):
+        if not on and self.loop_bars:  # loop off: back to the whole song, not one pass of the selection
+            self._loop_cleared()
+        else:
+            self._restart_if_running()
 
     def _loop_cleared(self):
         self.loop_bars = None

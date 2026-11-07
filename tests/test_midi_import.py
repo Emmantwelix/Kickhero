@@ -70,6 +70,16 @@ def test_tempo_change_is_flattened(tmp_path):
             assert round((n.t / lesson.beat) % 4) in (1, 3)
 
 
+def test_riff_midi_file(tmp_path):
+    """Some sites serve .mid downloads as RIFF MIDI (the standard file inside a RIFF wrapper)."""
+    smf = make_midi(tmp_path / "plain.mid").read_bytes()
+    pad = b"\0" if len(smf) % 2 else b""
+    body = b"RMID" + b"data" + len(smf).to_bytes(4, "little") + smf + pad
+    wrapped = tmp_path / "Wrapped.mid"
+    wrapped.write_bytes(b"RIFF" + len(body).to_bytes(4, "little") + body)
+    assert mi.read_drums(wrapped) == mi.read_drums(tmp_path / "plain.mid")
+
+
 def test_no_drums(tmp_path):
     with pytest.raises(mi.MidiImportError):
         mi.read_drums(make_midi(tmp_path / "x.mid", drums=False))

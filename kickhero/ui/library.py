@@ -21,7 +21,7 @@ from .drawing import icon
 from .fitting import ElidedLabel
 from .midi_import import MidiImportDialog
 
-MIDI_EXTS = {".mid", ".midi"}
+MIDI_EXTS = {".mid", ".midi", ".rmi"}
 
 
 def song_files(paths):
@@ -210,7 +210,7 @@ class LibraryPage(QWidget):
 
     def add_midi(self):
         files, _ = QFileDialog.getOpenFileNames(self, "Add MIDI files", str(Path.home() / "Downloads"),
-                                                "MIDI files (*.mid *.midi);;All files (*.*)")
+                                                "MIDI files (*.mid *.midi *.rmi);;All files (*.*)")
         for f in files:
             self.import_midi(f)
 

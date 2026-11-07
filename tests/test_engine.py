@@ -53,6 +53,14 @@ def test_perfect_play_scores_100():
     assert finished and finished[0][1]["accuracy"] == 1.0 and finished[0][1]["stars"] == 3
 
 
+def test_empty_bars_earn_no_stars():
+    lesson = from_notes("gap", BPM, [(0.0, "kick", 100), (6.0, "snare", 100)], bars=4)
+    s = Session(lesson, loop_bars=(1, 2))  # bar 2 has no notes
+    _, events = play(s, lesson)
+    finished = [e for e in events if e[0] == "finished"]
+    assert finished and finished[0][1]["notes"] == 0 and finished[0][1]["stars"] == 0
+
+
 def test_late_play_reports_offset_and_grade():
     lesson = rock_beat()
     s = Session(lesson)
