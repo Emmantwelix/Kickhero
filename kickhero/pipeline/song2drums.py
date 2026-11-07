@@ -54,13 +54,37 @@ def write_backing(stems, path):
         mix = y if mix is None else mix[: len(y)] + y[: len(mix)]
     if mix is None:
         return False
-    mix /= max(float(np.max(np.abs(mix))), 1.0)
+    write_ogg(mix, sr, path)
+    return True
+
+
+def write_backing_minus_drums(song, drums_wav, path):
+    """The play-along track as the song minus its drum stem (what the other stems add up to)."""
+    import librosa
+    import soundfile as sf
+
+    drums, sr = sf.read(str(drums_wav), dtype="float32", always_2d=True)
+    mix = librosa.load(str(song), sr=sr, mono=False)[0]  # decoded the same way the separator did
+    mix = np.atleast_2d(mix).T.astype(np.float32)
+    if mix.shape[1] != drums.shape[1]:
+        mix = np.repeat(mix[:, :1], drums.shape[1], axis=1)
+    n = min(len(mix), len(drums))
+    mix, drums = mix[:n], drums[:n]
+    # the separator may scale the stem it writes (peak normalising): match its level to the song first
+    gain = float(np.sum(mix * drums) / max(float(np.sum(drums * drums)), 1e-9))
+    write_ogg(mix - gain * drums, sr, path)
+    return True
+
+
+def write_ogg(mix, sr, path):
+    import soundfile as sf
+
+    mix = mix / max(float(np.max(np.abs(mix))), 1.0)
     # libsndfile's Vorbis encoder crashes the whole process on large single writes: write in blocks
     with sf.SoundFile(str(path), "w", sr, mix.shape[1], format="OGG", subtype="VORBIS",
                       compression_level=0.1) as f:  # 0 = best quality; default (~0.4) is noticeably lossy
         for i in range(0, len(mix), 16384):
             f.write(mix[i:i + 16384])
-    return True
 
 
 def write_metadata(path, **info):
@@ -87,6 +111,28 @@ def separate(model, audio_path, out_dir, model_dir, single_stem=None):
     )
     sep.load_model(model_filename=model)
     return [resolve(f, out_dir) for f in sep.separate(str(audio_path))]
+
+
+def drums_model(model):
+    """From a bag of Demucs models, the one with the most weight on the drums (a single model as it is)."""
+    if not hasattr(model, "models"):
+        return model
+    i = list(model.sources).index("drums")
+    return max(zip(model.models, model.weights), key=lambda mw: mw[1][i])[0]
+
+
+def separate_drums_only(audio_path, out_dir, model_dir):
+    """Just the drum stem, about 4x faster than separate(DRUMS_MODEL, ...). htdemucs_ft is a bag of four
+    fine-tuned models, one per stem, and the separator runs all four even when asked for one stem; this
+    runs only the one that makes the drums."""
+    from audio_separator.separator.architectures import demucs_separator
+
+    load = demucs_separator.get_demucs_model
+    demucs_separator.get_demucs_model = lambda *a, **kw: drums_model(load(*a, **kw))
+    try:
+        return separate(DRUMS_MODEL, audio_path, out_dir, model_dir, single_stem="Drums")
+    finally:
+        demucs_separator.get_demucs_model = load
 
 
 def detect_bpm(wav_path):
@@ -129,21 +175,29 @@ def process_song(song, args):
     t0 = time.time()
     steps = 2 if args.midi else 4
     print(f"[1/{steps}] Extracting drums from the mix...")
-    outs = separate(DRUMS_MODEL, song, work, args.model_dir)
+    # A MIDI file needs only the drums (to line it up) and the song without them: just the drum model
+    if args.midi:
+        outs = separate_drums_only(song, work, args.model_dir)
+    else:
+        outs = separate(DRUMS_MODEL, song, work, args.model_dir)
     drum_files = [f for f in outs if stem_name(f) == "drums"]
     if not drum_files:
         raise RuntimeError(f"Drum stem not produced; separator returned {outs}")
     drums_wav = song_dir / "drums.wav"
     shutil.move(str(drum_files[0]), drums_wav)  # fixed name, so the song title never confuses step 4
     backing = song_dir / "backing.ogg"
-    has_backing = write_backing([f for f in outs if f not in drum_files], backing)
+    if args.midi:
+        has_backing = write_backing_minus_drums(song, drums_wav, backing)
+    else:
+        has_backing = write_backing([f for f in outs if f not in drum_files], backing)
 
     if args.midi:
         from .midi_import import import_aligned
 
         print("[2/2] Lining up the MIDI file with the song...")
-        _, (rate, off) = import_aligned(args.midi, drums_wav, song_dir, name, backing=backing.name if has_backing else None,
-                                 source=str(Path(song).resolve()))
+        _, (rate, off) = import_aligned(args.midi, drums_wav, song_dir, name,
+                                        backing=backing.name if has_backing else None,
+                                        source=str(Path(song).resolve()))
         print(f"{rate:.0%} of the MIDI's kick and snare notes line up with drums heard in the song "
               f"({off:.0%} a beat off)")
         shutil.rmtree(work, ignore_errors=True)

@@ -107,13 +107,17 @@ def merge_hits(hits):
 
 
 def from_notes(title, bpm, notes, bars=None, **kw):
-    """Build a lesson from (t, lane, velocity[, open]) tuples; bars defaults to just enough to fit them."""
+    """Build a lesson from (t, lane, velocity[, open]) tuples; bars defaults to just enough to fit them,
+    and with a backing track, to play the song to its end (it often goes on after the last drum note)."""
     notes = classify_dynamics(sorted((Note(float(n[0]), n[1], int(n[2]), open=bool(n[3:] and n[3]))
                                       for n in notes), key=lambda n: (n.t, n.lane)))
     bar = 240.0 / bpm
     if bars is None:
         last = notes[-1].t if notes else 0.0
         bars = max(1, math.floor(last / bar + 1e-6) + 1)
+        end = backing_end(kw.get("backing"), kw.get("backing_offset", 0.0))
+        if end:
+            bars = max(bars, math.ceil(end / bar - 1e-3))
     return Lesson(title=title, bpm=bpm, notes=notes, bars=bars, **kw)
 
 
@@ -145,6 +149,18 @@ def load_midi(path, quantize=0, title=None):
     return from_notes(title, bpm, notes, source=path,
                       backing=backing if backing and backing.exists() else None,
                       backing_offset=-float(meta.get("shift") or 0.0))
+
+
+def backing_end(backing, backing_offset):
+    """Lesson time at which a backing track ends (None without one, or if it can't be read)."""
+    if not backing:
+        return None
+    try:
+        import soundfile as sf
+
+        return sf.info(str(backing)).duration - backing_offset
+    except Exception:
+        return None
 
 
 def read_metadata(midi_path):

@@ -243,6 +243,13 @@ def align(notes, info, audio_times, audio_weights, length):
     return t, info["bpm"] / scale, origin, float(pred.min() - lag), (match_rate(scored, audio[0]), off)
 
 
+def intro_shift(origin, earliest, bar):
+    """The shift (lesson time = recording time + shift) that keeps the whole recording, intro included:
+    bar 1 is the file's bar that starts at, or just before, the start of the recording (or before the
+    earliest note, if a note comes before that). `origin`: where the file's start falls in the recording."""
+    return -origin + math.ceil((origin - earliest) / bar - 1e-3) * bar
+
+
 def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None):
     """Write the MIDI's drum part lined up with a recording whose drum stem is drums_wav (and drumless
     mix `backing`, a file name in `folder`). Returns (MIDI path, (match rate, match rate a beat off))."""
@@ -250,10 +257,10 @@ def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None
     times, weights, length = drum_hits(drums_wav)
     if len(times) < 8:
         raise MidiImportError("Hardly any drums can be heard in this recording, so the MIDI can't be lined up.")
-    t, bpm, origin, first, fit = align(notes, info, times, weights, length)
-    # lesson time = recording time + shift; bar 1 is the file's first bar holding a note
-    shift = -origin + bar_trim(first, 240.0 / bpm)
+    t, bpm, origin, _, fit = align(notes, info, times, weights, length)
+    shift = intro_shift(origin, min(0.0, float(t.min())), 240.0 / bpm)
     out = [(float(ti) + shift, pitch, vel) for ti, (_, _, pitch, vel) in zip(t, notes)]
     path = write_song(folder, name, out, bpm, shift=shift, backing=backing, source=source,
-                      midi_source=str(Path(midi_path).resolve()), imported="midi", match=round(fit[0], 3), match_beat_off=round(fit[1], 3))
+                      midi_source=str(Path(midi_path).resolve()), imported="midi", match=round(fit[0], 3),
+                      match_beat_off=round(fit[1], 3))
     return path, fit
