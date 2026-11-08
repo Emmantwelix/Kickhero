@@ -15,6 +15,7 @@ from ..kit.calibration import measure_latency
 from ..kit.mapping import KitMap
 from ..lanes import LANE_COLORS, LANE_NAMES, LANES, OPEN_HAT, SOUND_NAMES, SOUNDS
 from . import theme
+from .kit_diagram import PEDAL, KitDiagram
 
 CAL_BPM = 100
 CAL_BARS = 4
@@ -55,6 +56,12 @@ def wizard_step_for(heard, note, step, velocity):
     return max(heard[note], key=lambda st: (*heard[note][st], -st))
 
 
+def step_part(step):
+    """The part of the kit drawing a pad setup step lights up."""
+    tile_lane, learn_as, _ = WIZARD_STEPS[step]
+    return {OPEN_HAT: OPEN_HAT, "": PEDAL}.get(learn_as, tile_lane)
+
+
 def wizard_step_name(step):
     tile_lane, learn_as, _ = WIZARD_STEPS[step]
     return {OPEN_HAT: "Open hi-hat", "": "Hi-hat pedal"}.get(learn_as, LANE_NAMES[tile_lane])
@@ -82,6 +89,7 @@ class PadTile(QFrame):
         border = c if state != "normal" else theme.BORDER
         self.setStyleSheet(f"PadTile {{ background: {bg}; border: 2px solid {border}; border-radius: 10px; }}")
         self.name.setStyleSheet(f"font-weight: 600; color: {'#14161f' if state == 'lit' else theme.TEXT};")
+        self.notes.setStyleSheet(f"color: {'#14161f' if state == 'lit' else theme.MUTED};")
 
     def blink(self):
         self.set_state("lit")
@@ -94,6 +102,7 @@ class KitPage(QWidget):
         self.ctx = ctx
         self.wizard_step = None  # index into WIZARD_STEPS while the pad setup runs
         self.wizard_heard = {}   # note -> {step: (hits, loudest velocity)} during this pad setup
+        self.wizard_single = False  # setting up one drum only (clicked on the kit drawing)
         self.cal = None  # running calibration: dict
 
         outer = QVBoxLayout(self)
@@ -123,8 +132,12 @@ class KitPage(QWidget):
         lay.addWidget(c)
 
         # --- pads ---
-        c, cl = card("Pads", "Hit any pad: its tile lights up. If a pad lights the wrong tile (or none), run the "
-                             "pad setup: you'll be asked to hit each drum once.")
+        c, cl = card("Pads", "Hit any pad: it lights up on the kit below. If the wrong drum lights up (or none), "
+                             "run the pad setup, or click a drum to set up just that one.")
+        self.diagram = KitDiagram()
+        self.diagram.setFixedHeight(270)
+        self.diagram.part_clicked.connect(self.setup_part)
+        cl.addWidget(self.diagram)
         grid = QGridLayout()
         grid.setSpacing(8)
         self.tiles = {}
@@ -142,7 +155,7 @@ class KitPage(QWidget):
         row = QHBoxLayout()
         self.setup_btn = QPushButton("Set up my pads...")
         self.setup_btn.setObjectName("primary")
-        self.setup_btn.clicked.connect(self.start_wizard)
+        self.setup_btn.clicked.connect(lambda: self.start_wizard())
         self.next_btn = QPushButton("Next drum")
         self.next_btn.clicked.connect(self.wizard_next)
         self.skip_btn = QPushButton("My kit doesn't have this")
@@ -288,9 +301,11 @@ class KitPage(QWidget):
             self.ctx.save_kit()
             self._refresh_notes()
             lane = tile_lane if learn_as else ""
+            self.diagram.set_done(step_part(st) for heard in self.wizard_heard.values() for st in heard)
             if step != self.wizard_step:  # a stray hit (or crosstalk) on a pad set up in another step
                 self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  kept as "
                                   f"{wizard_step_name(step)} (you played it more in that step)")
+                self.diagram.flash(step_part(step))
                 if lane:
                     self.tiles[lane].blink()
                 return
@@ -298,17 +313,30 @@ class KitPage(QWidget):
             self.cal["hits"].append(perf)
         if lane:
             self.tiles[lane].blink()
+            self.diagram.flash(OPEN_HAT if self.ctx.kit.is_open_hat(note) else lane)
             name = "Open hi-hat" if self.ctx.kit.is_open_hat(note) else LANE_NAMES[lane]
             self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  {name}")
         elif lane == "":
+            self.diagram.flash(PEDAL)
             self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  ignored (hi-hat pedal)")
         else:
             self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  not assigned. Run the pad setup.")
 
-    def start_wizard(self):
-        self.wizard_heard = {}
+    def start_wizard(self, first=0, single=False):
+        if self.wizard_step is None:
+            self.wizard_heard = {}
+            self.diagram.set_done(())
+        self.wizard_single = single
         self._show_wizard_buttons(True)
-        self._wizard_goto(0)
+        self._wizard_goto(first)
+
+    def setup_part(self, part):
+        """A drum clicked on the kit drawing: go to its step (or set up just that drum)."""
+        step = next(i for i in range(len(WIZARD_STEPS)) if step_part(i) == part)
+        if self.wizard_step is not None and not self.wizard_single:
+            self._wizard_goto(step)
+        else:
+            self.start_wizard(step, single=True)
 
     def _wizard_goto(self, i):
         for t in self.tiles.values():
@@ -319,18 +347,28 @@ class KitPage(QWidget):
         self.wizard_step = i
         tile_lane, _, text = WIZARD_STEPS[i]
         self.tiles[tile_lane].set_state("target")
-        self.wizard_text.setText(f"Step {i + 1} of {len(WIZARD_STEPS)}: {text[0].upper()}{text[1:]} "
-                                 "Then press Next drum.")
+        self.diagram.set_target(step_part(i))
+        if self.wizard_single:
+            self.wizard_text.setText(f"{text[0].upper()}{text[1:]} Then press Done.")
+        else:
+            self.wizard_text.setText(f"Step {i + 1} of {len(WIZARD_STEPS)}: {text[0].upper()}{text[1:]} "
+                                     "Then press Next drum.")
         self.wizard_text.show()
 
     def wizard_next(self):
-        self._wizard_goto(self.wizard_step + 1)
+        if self.wizard_single:
+            self.end_wizard()
+        else:
+            self._wizard_goto(self.wizard_step + 1)
 
     def wizard_skip(self):
         self.wizard_next()
 
     def end_wizard(self):
         self.wizard_step = None
+        self.wizard_single = False
+        self.diagram.set_target(None)
+        self.diagram.set_done(())
         self.wizard_text.hide()
         for t in self.tiles.values():
             t.set_state("normal")
@@ -340,6 +378,9 @@ class KitPage(QWidget):
     def _show_wizard_buttons(self, on):
         for b in (self.next_btn, self.skip_btn, self.cancel_btn):
             b.setVisible(on)
+        self.next_btn.setText("Done" if self.wizard_single else "Next drum")
+        self.skip_btn.setVisible(on and not self.wizard_single)
+        self.cancel_btn.setVisible(on and not self.wizard_single)
         self.setup_btn.setVisible(not on)
         self.reset_btn.setVisible(not on)
 

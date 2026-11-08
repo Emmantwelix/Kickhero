@@ -398,3 +398,11 @@ def test_rating_grade_and_reasons():
                     if b % 4 == 3 else []).rating()
     assert "Fills around the toms" in fills.reasons
     assert fills.hardest == 3 * 4 * 0.5                       # the first bar with a fill
+
+
+def test_every_pad_setup_step_lights_its_own_part_of_the_kit_drawing():
+    from kickhero.ui.kit_diagram import PARTS, PEDAL
+    from kickhero.ui.kit_setup import WIZARD_STEPS, step_part
+    parts = [step_part(i) for i in range(len(WIZARD_STEPS))]
+    assert sorted(parts) == sorted(PARTS)                     # one step per part, none missing
+    assert parts.index("hihat") + 1 == parts.index(OPEN_HAT) == parts.index(PEDAL) - 1
