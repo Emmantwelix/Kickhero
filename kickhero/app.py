@@ -17,10 +17,10 @@ from .kit.mapping import load_kit, save_kit
 from .kit.midi_input import MidiInput
 from .lanes import OPEN_HAT
 from .progress import Progress
-from .settings import Settings
+from .settings import Settings, data_dir
 from .ui import theme
 from .ui.course import CoursePage
-from .ui.drawing import icon
+from .ui.drawing import icon, stylesheet
 from .ui.editor import EditorPage
 from .ui.fitting import PageStack
 from .ui.grooves import GroovesPage
@@ -114,6 +114,7 @@ class MainWindow(QMainWindow):
         self.ctx = ctx
         self.setWindowTitle(APP_TITLE)
         self.resize(1280, 780)
+        self.setMinimumSize(960, 620)  # the smallest size every page is laid out for
 
         root = QWidget(objectName="root")
         self.setCentralWidget(root)
@@ -307,7 +308,7 @@ def main():
     app = QApplication(sys.argv)
     app.setApplicationName(APP_TITLE)
     app.setWindowIcon(QIcon(str(ICON)))
-    app.setStyleSheet(theme.STYLESHEET)
+    app.setStyleSheet(stylesheet(data_dir() / "ui"))
     ctx = AppContext()
     win = MainWindow(ctx)
     win.show()

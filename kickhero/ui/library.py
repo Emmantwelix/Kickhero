@@ -20,10 +20,10 @@ from ..pipeline.worker import ConvertJob
 from . import theme
 from .convert_settings import ConvertSettingsDialog
 from .covers import CoverLoader, generated_tile, split_title
-from .drawing import DIFFICULTY_COLORS, draw_grade, draw_stars, icon, qc
+from .drawing import DIFFICULTY_COLORS, draw_grade, draw_stars, icon, mix, qc
 from .fitting import ElidedLabel
 from .midi_import import MidiImportDialog
-from .widgets import CardGrid, Sparkline, chip, icon_button, rounded_pixmap
+from .widgets import CardGrid, HoverFade, Sparkline, chip, icon_button, rounded_pixmap
 
 MIDI_EXTS = {".mid", ".midi", ".rmi"}
 
@@ -133,6 +133,7 @@ class SongCard(QWidget):
         self.image = None
         self.selected = False
         self.hover = False
+        self.fade = HoverFade(self)
         self._pm = None
         self.setAttribute(Qt.WA_Hover)
         self.setMouseTracking(True)
@@ -185,9 +186,10 @@ class SongCard(QWidget):
         w, h = self.width(), self.height()
         r = 12
         card = QRectF(0.5, 0.5, w - 1, h - 1)
-        p.setPen(QPen(qc(theme.ACCENT if self.selected else theme.SURFACE_3 if self.hover else theme.BORDER),
+        t = self.fade.t
+        p.setPen(QPen(qc(theme.ACCENT) if self.selected else mix(theme.BORDER, theme.SURFACE_3, t),
                       2 if self.selected else 1))
-        p.setBrush(qc(theme.PANEL_2 if self.hover or self.selected else theme.PANEL))
+        p.setBrush(qc(theme.PANEL_2) if self.selected else mix(theme.PANEL, theme.PANEL_2, t))
         p.drawRoundedRect(card, r, r)
         # cover
         if self.image is not None:

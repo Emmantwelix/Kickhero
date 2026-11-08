@@ -4,9 +4,9 @@ keyboard drumming and the results screen. Two modes: Practice (any speed, loops,
 
 import time
 
-from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QActionGroup, QFont, QPainter
-from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider,
+from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider,
                                QToolButton, QVBoxLayout, QWidget)
 
 from ..engine.lesson import load_midi
@@ -16,7 +16,7 @@ from . import theme
 from .drawing import icon, qc
 from .fitting import ElidedLabel
 from .highway import Highway
-from .widgets import Popover, Segmented, StatRing, icon_button, state_icon
+from .widgets import KeysPopover, Popover, Segmented, StatRing, icon_button, state_icon
 
 # Play without a kit: keyboard keys as pads
 KEY_LANES = {
@@ -121,32 +121,11 @@ class SpeedPopup(Popover):
         self.changed.emit(v / 20)
 
 
-class HelpPopup(Popover):
-    """Keys and mouse tips (instead of a line of small print under the lanes)."""
+class HelpPopup(KeysPopover):
+    """Keys and mouse tips for the practice screen."""
 
     def __init__(self, parent=None):
-        super().__init__(parent)
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(18, 14, 18, 16)
-        lay.setSpacing(8)
-        lay.addWidget(QLabel("KEYS", objectName="group"))
-        grid = QGridLayout()
-        grid.setHorizontalSpacing(14)
-        grid.setVerticalSpacing(5)
-        for i, (key, what) in enumerate(HELP_KEYS):
-            k = QLabel(key)
-            k.setStyleSheet(f"background: {theme.PANEL_2}; border: 1px solid {theme.BORDER}; border-radius: 5px; "
-                            "padding: 2px 8px; font-weight: 600;")
-            grid.addWidget(k, i, 0, Qt.AlignLeft)
-            grid.addWidget(QLabel(what, objectName="muted"), i, 1)
-        lay.addLayout(grid)
-        lay.addWidget(QLabel("No kit? The keys above are your pads.", objectName="caption"))
-        lay.addSpacing(4)
-        lay.addWidget(QLabel("MOUSE", objectName="group"))
-        for tip in HELP_MOUSE:
-            t = QLabel(tip, objectName="muted", wordWrap=True)
-            t.setFixedWidth(330)
-            lay.addWidget(t)
+        super().__init__(HELP_KEYS, HELP_MOUSE, "No kit? The keys above are your pads.", parent)
 
 
 class GradeBar(QWidget):

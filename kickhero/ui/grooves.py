@@ -64,6 +64,25 @@ class GroovesPage(QWidget):
         self.style_row = FlowRow(spacing=6)  # filled in load(), from the library's styles
         lay.addWidget(self.style_row)
         lay.addSpacing(4)
+        self.empty = QWidget()
+        el = QVBoxLayout(self.empty)
+        el.setContentsMargins(0, 60, 0, 0)
+        el.setSpacing(10)
+        empty_icon = QLabel(alignment=Qt.AlignCenter)
+        empty_icon.setPixmap(icon("groove", "#5c6275", 48))
+        el.addWidget(empty_icon)
+        el.addWidget(QLabel("No groove library yet", objectName="h2", alignment=Qt.AlignCenter))
+        text = QLabel("Groove Lab plays grooves and fills recorded by a real drummer, from a groove library on this "
+                      "computer. Choose the library's folder (the one holding metadata.json) to start.",
+                      objectName="muted", alignment=Qt.AlignCenter, wordWrap=True)
+        text.setMaximumWidth(460)
+        el.addWidget(text, 0, Qt.AlignHCenter)
+        pick = QPushButton("  Choose groove folder", objectName="primary")
+        pick.setIcon(icon("folder", "#1a0f0b", 14))
+        pick.clicked.connect(self._choose_folder)
+        el.addSpacing(6)
+        el.addWidget(pick, 0, Qt.AlignHCenter)
+        lay.addWidget(self.empty)
         self.list = QVBoxLayout()
         self.list.setSpacing(8)
         lay.addLayout(self.list)
@@ -108,6 +127,9 @@ class GroovesPage(QWidget):
                                "(the one holding metadata.json).")
         for b in self.filter_btns:
             b.setVisible(bool(self.grooves))
+        self.empty.setVisible(not self.grooves)
+        self.about.setVisible(bool(self.grooves))
+        self.folder_btn.setVisible(bool(self.grooves))
         self._build()
 
     def _choose_folder(self):

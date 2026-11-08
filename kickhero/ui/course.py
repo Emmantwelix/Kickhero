@@ -7,8 +7,8 @@ from PySide6.QtWidgets import QCheckBox, QFrame, QHBoxLayout, QLabel, QPushButto
 
 from ..course import all_lessons, load_course, next_lesson, unlocked
 from . import theme
-from .drawing import draw_grade, draw_stars, icon, qc
-from .widgets import CardGrid
+from .drawing import draw_grade, draw_stars, icon, mix, qc
+from .widgets import CardGrid, HoverFade
 
 CARD_H = 108
 
@@ -21,6 +21,7 @@ class LessonCard(QPushButton):
         self.lesson = lesson
         self.rating = lesson.rating()
         self.best, self.passed, self.next_up = None, False, False
+        self.fade = HoverFade(self)
         self.setCursor(Qt.PointingHandCursor)
         self.setMinimumSize(170, CARD_H)
         self.setFocusPolicy(Qt.NoFocus)
@@ -41,14 +42,14 @@ class LessonCard(QPushButton):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         locked = not self.isEnabled()
-        hover = self.underMouse() and not locked
+        t = 0.0 if locked else self.fade.t
         if locked:
             p.setOpacity(0.55)
-        strong = self.next_up or hover
-        border = theme.ACCENT if strong else theme.GOOD if self.passed else theme.BORDER
-        p.setPen(QPen(qc(border, 0.9 if strong else 0.6 if self.passed else 1.0), 2 if self.next_up else 1,
-                      Qt.DashLine if locked else Qt.SolidLine))
-        p.setBrush(qc(theme.BG if locked else theme.SURFACE_3 if hover else theme.PANEL))
+        base = theme.GOOD if self.passed else theme.BORDER
+        border = qc(theme.ACCENT) if self.next_up else mix(base, theme.ACCENT, t)
+        border.setAlphaF(0.9 if (self.next_up or t > 0.5) else 0.6 if self.passed else 1.0)
+        p.setPen(QPen(border, 2 if self.next_up else 1, Qt.DashLine if locked else Qt.SolidLine))
+        p.setBrush(qc(theme.BG) if locked else mix(theme.PANEL, theme.SURFACE_3, t))
         p.drawRoundedRect(QRectF(1, 1, w - 2, h - 2), theme.RADIUS_CARD - 2, theme.RADIUS_CARD - 2)
 
         x, tw = 14, w - 28

@@ -1,9 +1,10 @@
 """Small reusable widgets in the app's style: segmented control, icon buttons and toggles, accuracy ring,
 popover panel, card grid, sparkline, filter chips."""
 
-from PySide6.QtCore import QPointF, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QEasingCurve, QEvent, QObject, QPointF, QRectF, QSize, Qt, QVariantAnimation, Signal
 from PySide6.QtGui import QFont, QGuiApplication, QIcon, QPainter, QPainterPath, QPen, QPixmap
-from PySide6.QtWidgets import QButtonGroup, QFrame, QHBoxLayout, QPushButton, QSizePolicy, QWidget
+from PySide6.QtWidgets import (QButtonGroup, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton, QSizePolicy,
+                               QVBoxLayout, QWidget)
 
 from . import theme
 from .drawing import icon, qc
@@ -19,6 +20,33 @@ QFrame#segment QPushButton:checked {{ background: {theme.ACCENT_SOFT}; border-co
 QFrame#segment QPushButton:disabled {{ color: {theme.FAINT}; background: transparent; border-color: transparent; }}
 QFrame#segment QPushButton:checked:disabled {{ background: {theme.SURFACE_3}; border-color: {theme.SURFACE_3}; }}
 """
+
+
+class HoverFade(QObject):
+    """A widget's hover as a value that eases between 0 and 1 (`t`), so painted cards fade their hover look in
+    and out instead of snapping. The widget repaints as it changes."""
+
+    MS = 160
+
+    def __init__(self, widget):
+        super().__init__(widget)
+        self.widget, self.t = widget, 0.0
+        self.anim = QVariantAnimation(self, duration=self.MS, easingCurve=QEasingCurve.OutCubic)
+        self.anim.valueChanged.connect(self._set)
+        widget.installEventFilter(self)
+
+    def _set(self, v):
+        self.t = float(v)
+        self.widget.update()
+
+    def eventFilter(self, obj, e):
+        if e.type() in (QEvent.Enter, QEvent.Leave):
+            self.anim.stop()
+            self.anim.setStartValue(self.t)
+            self.anim.setEndValue(1.0 if e.type() == QEvent.Enter else 0.0)
+            self.anim.setDuration(round(self.MS * abs((1.0 if e.type() == QEvent.Enter else 0.0) - self.t)) or 1)
+            self.anim.start()
+        return False
 
 
 def state_icon(name, size=16, off=theme.MUTED, on=theme.TEXT):
@@ -155,6 +183,36 @@ class Popover(QFrame):
         self.move(pos)
         self.show()
 
+
+
+class KeysPopover(Popover):
+    """Keys and mouse tips under a "?" button (instead of a line of small print on the page)."""
+
+    def __init__(self, keys, mouse=(), note="", parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 14, 18, 16)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel("KEYS", objectName="group"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(5)
+        for i, (key, what) in enumerate(keys):
+            k = QLabel(key)
+            k.setStyleSheet(f"background: {theme.PANEL_2}; border: 1px solid {theme.BORDER}; border-radius: 5px; "
+                            "padding: 2px 8px; font-weight: 600;")
+            grid.addWidget(k, i, 0, Qt.AlignLeft)
+            grid.addWidget(QLabel(what, objectName="muted"), i, 1)
+        lay.addLayout(grid)
+        if note:
+            lay.addWidget(QLabel(note, objectName="caption"))
+        if mouse:
+            lay.addSpacing(4)
+            lay.addWidget(QLabel("MOUSE", objectName="group"))
+            for tip in mouse:
+                t = QLabel(tip, objectName="muted", wordWrap=True)
+                t.setFixedWidth(330)
+                lay.addWidget(t)
 
 
 class CardGrid(QWidget):

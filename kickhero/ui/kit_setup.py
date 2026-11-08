@@ -120,12 +120,11 @@ class KitPage(QWidget):
         c, cl = card("Connection", "Plug your kit in with its USB cable and switch it on. It shows up here "
                                    "automatically; any kit that sends MIDI over USB works.")
         row = QHBoxLayout()
-        self.status = QLabel()
+        self.status = QLabel(wordWrap=True)
         self.devices = QComboBox()
-        self.devices.setMinimumWidth(260)
+        self.devices.setMinimumWidth(200)
         self.devices.activated.connect(lambda _: ctx.midi.open(self.devices.currentText()))
-        row.addWidget(self.status)
-        row.addStretch()
+        row.addWidget(self.status, 1)
         row.addWidget(QLabel("Device"))
         row.addWidget(self.devices)
         cl.addLayout(row)
@@ -189,11 +188,12 @@ class KitPage(QWidget):
 
         # --- sound ---
         c, cl = card("Sound")
-        self.pad_sounds = QCheckBox("Play drum sounds from this app  (turn on if your kit makes no sound of its own, "
-                                    "or you're listening through the computer)")
+        self.pad_sounds = QCheckBox("Play drum sounds from this app")
         self.pad_sounds.setChecked(ctx.settings["pad_sounds"])
         self.pad_sounds.toggled.connect(lambda on: ctx.settings.__setitem__("pad_sounds", on))
         cl.addWidget(self.pad_sounds)
+        cl.addWidget(QLabel("Turn this on if your kit makes no sound of its own, or you're listening through the "
+                            "computer.", objectName="caption", wordWrap=True))
         vol = QGridLayout()
         for r, (key, text) in enumerate((("metronome", "Metronome"), ("pads", "Drum sounds"),
                                          ("guide", "\"Hear the part\" playback"))):

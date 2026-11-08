@@ -87,18 +87,22 @@ class ConvertSettingsDialog(QDialog):
         self.split = QCheckBox("Split toms into high / mid / floor tom")
         self.grid = QComboBox()
         self.grid.addItems([g for g, _ in GRIDS])
+        more.addWidget(QLabel("BAR LINES AND DRUMS", objectName="group"))
         more.addWidget(self.align)
         more.addWidget(self.split)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Snap the saved MIDI to a grid:"))
+        row.addWidget(QLabel("Snap the saved MIDI to a grid"))
         row.addWidget(self.grid)
         row.addStretch()
         more.addLayout(row)
-        more.addWidget(QLabel("(Practice can snap notes by itself, so \"Off\" is usually best here.)",
-                              objectName="muted"))
+        more.addWidget(QLabel("Practice can snap notes by itself, so \"Off\" is usually best here.",
+                              objectName="caption", wordWrap=True))
+        more.addSpacing(8)
+        more.addWidget(QLabel("FINDING THE HITS", objectName="group"))
 
         g = QGridLayout()
         g.setHorizontalSpacing(12)
+        g.setVerticalSpacing(4)
         self.sliders = {}
         r = 0
         for key, title, lo, hi, step, unit, text in TUNING:
@@ -115,13 +119,14 @@ class ConvertSettingsDialog(QDialog):
             g.addWidget(t, r, 0)
             g.addWidget(s, r, 1)
             g.addWidget(val, r, 2)
-            hint = QLabel(text, objectName="muted", wordWrap=True)
+            hint = QLabel(text, objectName="caption", wordWrap=True)
+            hint.setContentsMargins(0, 0, 0, 8)
             g.addWidget(hint, r + 1, 0, 1, 3)
             r += 2
         more.addLayout(g)
 
         buttons = QHBoxLayout()
-        reset = QPushButton("Reset to defaults")
+        reset = QPushButton("Reset to defaults", objectName="flat")
         reset.clicked.connect(lambda: self._load(DEFAULT_OPTIONS))
         cancel = QPushButton("Cancel")
         cancel.clicked.connect(self.reject)

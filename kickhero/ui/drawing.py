@@ -9,6 +9,12 @@ GEM_H = 0.6  # every note is the same size: this share of the lane's height, bas
 INK = "#14161f"  # the accent sign drawn on a note
 
 
+def mix(a, b, t):
+    """The colour t of the way from hex colour a to b (t 0-1), for hover fades."""
+    ca, cb = QColor(a), QColor(b)
+    return QColor.fromRgbF(*(x + (y - x) * t for x, y in zip(ca.getRgbF()[:3], cb.getRgbF()[:3])))
+
+
 def qc(hex_color, alpha=1.0):
     c = QColor(hex_color)
     c.setAlphaF(max(0.0, min(1.0, alpha)))
@@ -211,6 +217,15 @@ def _line_icon(p, name, s, color):
         fill()
         p.drawPolygon([pt(8 + (6.5 if k % 2 == 0 else 2.8) * math.sin(k * math.pi / 5),
                           8.6 - (6.5 if k % 2 == 0 else 2.8) * math.cos(k * math.pi / 5)) for k in range(10)])
+    elif name in ("undo", "redo"):
+        from PySide6.QtGui import QPainterPath
+        m = (lambda x: x) if name == "undo" else (lambda x: 16 - x)  # redo is undo mirrored
+        p.drawPolyline([pt(m(6), 3), pt(m(3), 6), pt(m(6), 9)])
+        path = QPainterPath(pt(m(3), 6))
+        path.lineTo(pt(m(9.5), 6))
+        path.cubicTo(pt(m(14), 6), pt(m(14), 13), pt(m(9.5), 13))
+        path.lineTo(pt(m(5), 13))
+        p.drawPath(path)
     elif name == "chevron_down":
         p.drawPolyline([pt(4, 6), pt(8, 10), pt(12, 6)])
     elif name == "chevron_right":
@@ -274,3 +289,16 @@ def draw_grade(p, x, y, letter, size=16):
     p.setPen(qc(theme.BG))
     p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, letter)
     p.restore()
+
+
+def stylesheet(folder):
+    """The app's stylesheet, with the checkbox tick drawn into `folder` (needs a running QApplication)."""
+    from pathlib import Path
+
+    path = Path(folder) / "check.png"
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        icon("check", "#1a0f0b", 16).save(str(path))
+        return theme.STYLESHEET + theme.check_css(path)
+    except OSError:
+        return theme.STYLESHEET

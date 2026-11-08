@@ -11,7 +11,7 @@ import time
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QFont, QKeySequence, QPainter, QPen, QPixmap, QShortcut
-from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QHBoxLayout, QInputDialog, QLabel, QMenu,
+from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFrame, QHBoxLayout, QInputDialog, QLabel, QMenu,
                                QMessageBox, QPushButton, QScrollBar, QSlider, QVBoxLayout, QWidget)
 
 from ..engine.editing import VELOCITY, load_part
@@ -20,8 +20,17 @@ from ..engine.session import Session
 from ..lanes import LANE_COLORS, LANE_NAMES, LANES
 from . import theme
 from .convert_settings import TEMPO_FIXES
-from .drawing import gem_rect, gem_style, note_marks, qc
+from .drawing import gem_rect, gem_style, icon, note_marks, qc
 from .fitting import ElidedLabel, FlowRow
+from .widgets import KeysPopover, icon_button, state_icon
+
+EDIT_KEYS = [("Click", "Add a note"), ("Drag", "Move it (up / down changes the drum)"), ("Double-click", "Delete it"),
+             ("Right-click", "Strength, open hi-hat, drum, bar 1"), ("A  N  G", "Accent / normal / ghost"),
+             ("O", "Open hi-hat"), ("Del", "Delete the selected notes"), ("Arrows", "Move the selected notes"),
+             ("Ctrl+C / V", "Copy / paste bars"), ("Ctrl+Z / Y", "Undo / redo"), ("Ctrl+S", "Save"),
+             ("Ctrl+wheel", "Zoom"), ("Space", "Play / stop")]
+EDIT_MOUSE = ["Drag across the bar numbers to select bars: Play then loops them, and Ctrl+C copies them",
+              "Drag on empty space to select several notes"]
 
 RULER_H = 30
 LABEL_W = 110
@@ -503,63 +512,70 @@ class EditorPage(QWidget):
         lay.setSpacing(10)
 
         top = QHBoxLayout()
-        self.back_btn = QPushButton("←  Songs")
+        self.back_btn = icon_button("back", "Songs", flat=True)
         self.back_btn.clicked.connect(self._go_back)
         top.addWidget(self.back_btn)
-        top.addSpacing(10)
+        top.addSpacing(6)
         self.title = ElidedLabel(objectName="h2")
         top.addWidget(self.title)
         self.info = ElidedLabel(objectName="muted")
         top.addWidget(self.info)
         top.addStretch()
-        self.practise_btn = QPushButton("Practise  ▶")
+        self.practise_btn = QPushButton("  Practise", objectName="primary")
+        self.practise_btn.setIcon(icon("play", "#1a0f0b", 14))
         self.practise_btn.clicked.connect(self._practise)
         top.addWidget(self.practise_btn)
         lay.addLayout(top)
 
+        toolbar = QFrame(objectName="bar")
+        tl = QVBoxLayout(toolbar)
+        tl.setContentsMargins(10, 8, 10, 8)
         bar = FlowRow(spacing=8)
-        self.play_btn = QPushButton("▶  Play")
-        self.play_btn.setToolTip("Play from the orange cursor, or loop the bars selected on the ruler (Space)")
+        tl.addWidget(bar)
+        self.play_btn = icon_button("play", "Play",
+                                    tip="Play from the orange cursor, or loop the bars selected on the ruler (Space)")
         self.play_btn.clicked.connect(self.toggle_play)
         bar.addWidget(self.play_btn)
-        self.click_btn = QPushButton("Click")
-        self.click_btn.setCheckable(True)
-        self.click_btn.setToolTip("Metronome while playing back")
+        self.click_btn = icon_button("metronome", "Click", tip="Metronome while playing back", checkable=True)
         bar.addWidget(self.click_btn)
-        bar.addSpacing(10)
-        bar.addWidget(QLabel("Snap"))
+        bar.addSpacing(14)
+        bar.addWidget(QLabel("Snap", objectName="muted"))
         self.snap = QComboBox()
         for name, _ in SNAPS:
             self.snap.addItem(name)
         self.snap.setCurrentIndex(2)
         self.snap.currentIndexChanged.connect(lambda i: setattr(self.grid, "grid", SNAPS[i][1]) or self.grid.update())
         bar.addWidget(self.snap)
-        bar.addWidget(QLabel("Zoom"))
+        bar.addWidget(QLabel("Zoom", objectName="muted"))
         self.zoom = QSlider(Qt.Horizontal)
         self.zoom.setRange(15, 260)
         self.zoom.setValue(70)
         self.zoom.setFixedWidth(110)
         self.zoom.valueChanged.connect(lambda v: self.grid.part and self.grid.set_zoom(v))
         bar.addWidget(self.zoom)
-        bar.addSpacing(10)
-        self.undo_btn = QPushButton("Undo")
+        bar.addSpacing(14)
+        self.undo_btn = icon_button("undo", tip="Undo (Ctrl+Z)")
         self.undo_btn.clicked.connect(self.undo)
-        self.redo_btn = QPushButton("Redo")
+        self.redo_btn = icon_button("redo", tip="Redo (Ctrl+Y)")
         self.redo_btn.clicked.connect(self.redo)
-        tempo = QPushButton("Tempo && bar 1...")
+        tempo = icon_button("metronome", "Tempo && bar 1...", tip="Fix the tempo, or move where bar 1 starts")
         tempo.clicked.connect(self.edit_tempo)
         for b in (self.undo_btn, self.redo_btn, tempo):
             bar.addWidget(b)
-        bar.addSpacing(10)
-        self.revert_btn = QPushButton("Revert to converted")
+        bar.addSpacing(14)
+        self.revert_btn = QPushButton("Revert to converted", objectName="flat")
         self.revert_btn.setToolTip("Throw away all edits and go back to the converter's version")
         self.revert_btn.clicked.connect(self.revert)
         bar.addWidget(self.revert_btn)
         self.save_btn = QPushButton("Save")
         self.save_btn.setObjectName("primary")
+        self.save_btn.setToolTip("Save (Ctrl+S)")
         self.save_btn.clicked.connect(self.save)
         bar.addWidget(self.save_btn)
-        lay.addWidget(bar)
+        self.help_btn = icon_button("help", flat=True, tip="Keys and tips")
+        self.help_btn.clicked.connect(lambda: KeysPopover(EDIT_KEYS, EDIT_MOUSE, parent=self).show_under(self.help_btn))
+        bar.addWidget(self.help_btn)
+        lay.addWidget(toolbar)
 
         self.grid = EditorGrid(self)
         self.grid.changed.connect(self._changed)
@@ -569,12 +585,6 @@ class EditorPage(QWidget):
 
         self.status = QLabel(objectName="muted")
         lay.addWidget(self.status)
-        hint = QLabel("Click to add a note  ·  drag to move it (up/down changes the drum)  ·  double-click deletes  ·  "
-                      "right-click for strength, open hi-hat, drum, bar 1  ·  drag on the bar numbers to select bars  "
-                      "·  A / N / G = accent / normal / ghost  ·  O = open hi-hat  ·  Del  ·  arrows  ·  Ctrl+C / "
-                      "Ctrl+V bars  ·  Ctrl+Z / Ctrl+Y  ·  Ctrl+wheel zoom  ·  Space play",
-                      objectName="hint", wordWrap=True)
-        lay.addWidget(hint)
 
         for keys, fn in (("Ctrl+Z", self.undo), ("Ctrl+Y", self.redo), ("Ctrl+Shift+Z", self.redo),
                          ("Ctrl+S", self.save), ("Ctrl+C", self.copy_bars), ("Ctrl+V", self.paste_bars),
@@ -856,7 +866,8 @@ class EditorPage(QWidget):
         audio.muted.clear()
         self.session = s
         audio.session = s
-        self.play_btn.setText("■  Stop")
+        self.play_btn.setText("Stop")
+        self.play_btn.setIcon(state_icon("stop"))
         self.timer.start(15)
 
     def stop(self):
@@ -871,7 +882,8 @@ class EditorPage(QWidget):
             self._audio_state = None
         self.grid.playhead = None
         self.grid.update()
-        self.play_btn.setText("▶  Play")
+        self.play_btn.setText("Play")
+        self.play_btn.setIcon(state_icon("play"))
 
     def _tick(self):
         s = self.session

@@ -2,8 +2,8 @@
 
 from pathlib import Path
 
-from PySide6.QtWidgets import (QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton,
-                               QRadioButton, QVBoxLayout)
+from PySide6.QtWidgets import (QButtonGroup, QDialog, QFileDialog, QHBoxLayout, QLabel, QLineEdit,
+                               QPushButton, QRadioButton, QVBoxLayout)
 
 from ..lanes import LANE_NAMES, LANES, NOTE_TO_LANE
 from ..pipeline.midi_import import read_drums, song_name
@@ -22,7 +22,7 @@ class MidiImportDialog(QDialog):
         notes, info = read_drums(self.midi_path)
         self.audio = None
         self.setWindowTitle("Add MIDI file")
-        self.setMinimumWidth(560)
+        self.setFixedWidth(560)  # a set width, so the height can follow the wrapped text
         lay = QVBoxLayout(self)
         lay.setContentsMargins(22, 18, 22, 18)
         lay.setSpacing(10)
@@ -74,6 +74,10 @@ class MidiImportDialog(QDialog):
         lay.addLayout(buttons)
         self._update()
 
+    def showEvent(self, e):
+        super().showEvent(e)
+        self._update()  # sized again now its real width is known, so no text is squeezed
+
     def _choose(self):
         exts = " ".join(f"*{e}" for e in sorted(SONG_EXTS))
         start = str(self.audio.parent if self.audio else Path.home() / "Music")
@@ -94,6 +98,7 @@ class MidiImportDialog(QDialog):
             self.explain.setText("The drum part is put on one steady tempo. You hear the drum sounds and the "
                                  "metronome, but no song.")
         self.explain.setMinimumHeight(self.explain.heightForWidth(self.width() - 44))  # never clip the text
+        self.adjustSize()
         self.ok.setText("Add and line up" if song else "Add song")
         self.ok.setEnabled(bool(self.song_name()) and (not song or self.audio is not None))
 
