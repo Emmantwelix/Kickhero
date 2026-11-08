@@ -34,6 +34,12 @@ class CourseLesson:
         """Progress key: course lessons are stored next to song paths in the progress database."""
         return f"course:{self.id}"
 
+    def rating(self):
+        """The lesson's Rating (E/M/H, why), worked out once."""
+        if "_rating" not in self.__dict__:
+            self.__dict__["_rating"] = self.to_lesson().rating()
+        return self.__dict__["_rating"]
+
     def to_lesson(self):
         """Build the playable lesson: the pattern repeated `repeats` times."""
         bar_count = max(len(p.split("|")) for p in self.pattern.values())

@@ -1,13 +1,19 @@
 """Groove Lab page: real drum grooves from a groove library installed on this computer (see course.grooves),
 by level, with filters. Nothing is locked: play them in any order."""
 
+from collections import Counter
+
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QFrame, QGridLayout, QHBoxLayout, QLabel, QPushButton,
-                               QScrollArea, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QButtonGroup, QFileDialog, QFrame, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+                               QVBoxLayout, QWidget)
 
 from ..course.grooves import LEVELS, find_folder, load_grooves
 from .course import LessonCard
+from .drawing import icon
 from .fitting import FlowRow
+from .widgets import CardGrid, chip
+
+STYLES = 8  # style chips: the most common styles in the library
 
 
 FILTERS = {  # name -> [(button text, test on a GrooveLesson)]
@@ -52,25 +58,47 @@ class GroovesPage(QWidget):
         self.filters = FlowRow(spacing=6)
         self.filter_btns = []
         for name, options in FILTERS.items():
-            group = QButtonGroup(self)
-            for i, (text, _) in enumerate(options):
-                b = QPushButton(text, checkable=True, checked=i == 0)
-                b.setFocusPolicy(Qt.NoFocus)
-                group.addButton(b, i)
-                self.filters.addWidget(b)
-                self.filter_btns.append(b)
-            group.idClicked.connect(lambda i, n=name: self._filter(n, i))
+            self._chip_group(self.filters, name, [text for text, _ in options])
             self.filters.addSpacing(14)
         lay.addWidget(self.filters)
+        self.style_row = FlowRow(spacing=6)  # filled in load(), from the library's styles
+        lay.addWidget(self.style_row)
+        lay.addSpacing(4)
         self.list = QVBoxLayout()
         self.list.setSpacing(8)
         lay.addLayout(self.list)
         lay.addStretch()
         self.load()
 
+    def _chip_group(self, row, name, labels):
+        group = QButtonGroup(self)
+        for i, text in enumerate(labels):
+            b = chip(text)
+            b.setChecked(i == 0)
+            group.addButton(b, i)
+            row.addWidget(b)
+            self.filter_btns.append(b)
+        group.idClicked.connect(lambda i, n=name: self._filter(n, i))
+        return group
+
+    def _build_styles(self):
+        """Style chips for the most common styles (Post Rock, Ghost Note...) in this library."""
+        while self.style_row.flow.count():
+            item = self.style_row.flow.takeAt(0)
+            if item.widget():
+                self.filter_btns = [b for b in self.filter_btns if b is not item.widget()]
+                item.widget().deleteLater()
+        common = [v for v, _ in Counter(v for g in self.grooves for v in g.vibe).most_common(STYLES)]
+        FILTERS["style"] = [("Any style", lambda g: True)] + [(v, lambda g, v=v: v in g.vibe) for v in common]
+        self.choice["style"] = 0
+        if common:
+            self._chip_group(self.style_row, "style", [text for text, _ in FILTERS["style"]])
+        self.style_row.setVisible(bool(common))
+
     def load(self):
         folder = find_folder(self.ctx.settings.data.get("groove_folder", ""))
         self.grooves = load_grooves(folder)
+        self._build_styles()
         if self.grooves:
             self.about.setText(f"{len(self.grooves)} grooves and fills played by a real drummer, in {LEVELS} levels "
                                "from easiest to hardest. Play them in any order; short ones repeat until the lesson "
@@ -116,32 +144,44 @@ class GroovesPage(QWidget):
         for level, grooves in sorted(by_level.items()):
             box = QWidget()
             col = QVBoxLayout(box)
-            col.setContentsMargins(0, 6, 0, 0)
-            col.setSpacing(6)
+            col.setContentsMargins(0, 8, 0, 4)
+            col.setSpacing(10)
             lo, hi = min(g.bpm for g in grooves), max(g.bpm for g in grooves)
             bpm = f"{lo:.0f}" if lo == hi else f"{lo:.0f}-{hi:.0f}"
-            ends = {1: "  ·  easiest", LEVELS: "  ·  hardest"}.get(level, "")
+            ends = {1: "easiest", LEVELS: "hardest"}.get(level, "")
             is_open = level in self.open_levels
             done = sum(self.ctx.progress.passed(g.key) for g in grooves)
-            header = QPushButton(f"{'▾' if is_open else '▸'}   Level {level}{ends}   ·   {len(grooves)} grooves   ·   "
-                                 f"{bpm} BPM   ·   {done} passed", objectName="level")
+            header = QPushButton(objectName="levelrow")
             header.setCursor(Qt.PointingHandCursor)
             header.setFocusPolicy(Qt.NoFocus)
+            header.setStyleSheet("QPushButton#levelrow { background: transparent; border: none; padding: 0; }")
+            hl = QHBoxLayout(header)
+            hl.setContentsMargins(0, 0, 0, 0)
+            hl.setSpacing(10)
+            arrow = QLabel()
+            arrow.setPixmap(icon("chevron_down" if is_open else "chevron_right", "#8a90a3", 16))
+            title = QLabel(f"Level {level}", objectName="h2")
+            meta = QLabel(f"{len(grooves)} grooves  ·  {bpm} BPM  ·  {done} passed"
+                          + (f"  ·  {ends}" if ends else ""), objectName="caption")
+            for w in (arrow, title, meta):
+                w.setAttribute(Qt.WA_TransparentForMouseEvents)
+                hl.addWidget(w, 0, Qt.AlignVCenter)
+            hl.addStretch()
+            header.setFixedHeight(32)
             header.clicked.connect(lambda _=False, lv=level: self._toggle_level(lv))
             col.addWidget(header)
             self.list.addWidget(box)
             if not is_open:
                 continue
-            grid = QGridLayout()
-            grid.setSpacing(10)
-            for i, g in enumerate(grooves):
+            grid = CardGrid(min_width=190, gap=12)
+            cards = []
+            for g in grooves:
                 card = LessonCard(g)
                 card.clicked.connect(lambda _=False, g=g: self.play.emit(g))
-                grid.addWidget(card, i // 4, i % 4)
-                self.cards.append(card)
-            for c in range(4):
-                grid.setColumnStretch(c, 1)
-            col.addLayout(grid)
+                cards.append(card)
+            grid.set_cards(cards)
+            col.addWidget(grid)
+            self.cards += cards
         if self.grooves and not by_level:
             self.list.addWidget(QLabel("No grooves match these filters.", objectName="muted"))
 

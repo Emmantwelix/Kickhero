@@ -20,7 +20,7 @@ from ..pipeline.worker import ConvertJob
 from . import theme
 from .convert_settings import ConvertSettingsDialog
 from .covers import CoverLoader, generated_tile, split_title
-from .drawing import icon, qc
+from .drawing import DIFFICULTY_COLORS, draw_grade, draw_stars, icon, qc
 from .fitting import ElidedLabel
 from .midi_import import MidiImportDialog
 from .widgets import CardGrid, Sparkline, chip, icon_button, rounded_pixmap
@@ -50,9 +50,6 @@ def song_files(paths):
 
 def midi_files(paths):
     return [p for p in map(Path, paths) if p.suffix.lower() in MIDI_EXTS and p.is_file()]
-
-
-GRADE_COLORS = {"E": theme.GOOD, "M": theme.WARN, "H": theme.BAD}
 
 
 def mmss(seconds):
@@ -118,28 +115,6 @@ def load_songs(folder, progress):
                           rating=lesson.rating(), notes=len(lesson.notes), backing=bool(lesson.backing),
                           best=progress.best(f), added=added, meta=read_metadata(f)))
     return songs
-
-
-def draw_stars(p, x, y, stars, size=12, gap=2):
-    for i in range(3):
-        p.drawPixmap(round(x + i * (size + gap)), round(y),
-                     icon("star", theme.WARN if i < stars else theme.FAINT, size))
-
-
-def draw_grade(p, x, y, letter, size=16):
-    """The difficulty grade, E, M or H, as a small colored badge."""
-    color = GRADE_COLORS[letter]
-    p.setPen(Qt.NoPen)
-    p.setBrush(qc(color))
-    p.drawRoundedRect(QRectF(x, y, size, size), 4, 4)
-    f = p.font()
-    f.setBold(True)
-    f.setPointSizeF(size * 0.5)
-    p.save()
-    p.setFont(f)
-    p.setPen(qc(theme.BG))
-    p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, letter)
-    p.restore()
 
 
 class SongCard(QWidget):
@@ -363,7 +338,7 @@ class DetailPanel(QFrame):
         self.stats["length"].setText(song.length_text)
         r = song.rating
         self.stats["level"].setTextFormat(Qt.RichText)
-        self.stats["level"].setText(f"<span style='color:{GRADE_COLORS[r.grade]}'>{r.grade_name}</span> "
+        self.stats["level"].setText(f"<span style='color:{DIFFICULTY_COLORS[r.grade]}'>{r.grade_name}</span> "
                                     f"<span style='color:{theme.MUTED}'>{r.level}/10</span>")
         why = ", ".join([r.reasons[0]] + [x[0].lower() + x[1:] for x in r.reasons[1:]]) if r.reasons             else "A steady, simple beat"
         hardest = f"<br>Hardest part around {mmss(r.hardest)}" if r.reasons and r.hardest else ""

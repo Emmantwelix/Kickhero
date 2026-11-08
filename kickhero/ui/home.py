@@ -355,8 +355,9 @@ class HomePage(QWidget):
                             bool(self.ctx.settings.data.get("course_unlock_all")))
         for i, les in enumerate(lessons[start:start + 4]):
             card = LessonCard(les)
-            card.setMinimumSize(130, 92)  # four in a row, even in a narrow window
-            card.set_state(self.ctx.progress.best(les.key), les.id in open_ids, self.ctx.progress.passed(les.key))
+            card.setMinimumWidth(130)  # four in a row, even in a narrow window
+            card.set_state(self.ctx.progress.best(les.key), les.id in open_ids, self.ctx.progress.passed(les.key),
+                           next_up=les is nxt)
             card.clicked.connect(lambda _=False, les=les: self.play_lesson.emit(les))
             self.lessons_grid.addWidget(card, 0, i)
             self.lesson_cards.append(card)

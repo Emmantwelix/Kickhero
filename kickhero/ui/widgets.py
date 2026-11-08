@@ -160,11 +160,12 @@ class Popover(QFrame):
 class CardGrid(QWidget):
     """Cards in as many equal columns as fit (at least min_width each), re-flowed when resized.
     The cards size themselves from their width: card.height_for(width). With max_rows, cards that don't fit
-    in that many rows are hidden (e.g. one row on the home page)."""
+    in that many rows are hidden (e.g. one row on the home page). With fill, a short row of cards stretches
+    across the whole width instead of leaving empty columns."""
 
-    def __init__(self, min_width=180, gap=16, max_rows=None, parent=None):
+    def __init__(self, min_width=180, gap=16, max_rows=None, fill=False, parent=None):
         super().__init__(parent)
-        self.min_width, self.gap, self.max_rows = min_width, gap, max_rows
+        self.min_width, self.gap, self.max_rows, self.fill = min_width, gap, max_rows, fill
         self.cards = []
         self.columns = 1
 
@@ -182,6 +183,8 @@ class CardGrid(QWidget):
     def relayout(self):
         w = max(self.width(), self.min_width)
         cols = max(1, (w + self.gap) // (self.min_width + self.gap))
+        if self.fill and self.cards:
+            cols = min(cols, len(self.cards))
         cw = (w - self.gap * (cols - 1)) / cols
         self.columns = cols
         shown = self.cards[:cols * self.max_rows] if self.max_rows else self.cards

@@ -211,6 +211,10 @@ def _line_icon(p, name, s, color):
         fill()
         p.drawPolygon([pt(8 + (6.5 if k % 2 == 0 else 2.8) * math.sin(k * math.pi / 5),
                           8.6 - (6.5 if k % 2 == 0 else 2.8) * math.cos(k * math.pi / 5)) for k in range(10)])
+    elif name == "chevron_down":
+        p.drawPolyline([pt(4, 6), pt(8, 10), pt(12, 6)])
+    elif name == "chevron_right":
+        p.drawPolyline([pt(6, 4), pt(10, 8), pt(6, 12)])
     elif name == "close":  # an x
         p.drawLine(pt(4, 4), pt(12, 12))
         p.drawLine(pt(12, 4), pt(4, 12))
@@ -245,3 +249,28 @@ def speaker(p, rect, muted):
         for k in (1, 2):
             rad = 4 * k * s
             p.drawArc(QRectF(x + 8 * s - rad, cy - rad, 2 * rad, 2 * rad), -50 * 16, 100 * 16)
+
+
+DIFFICULTY_COLORS = {"E": theme.GOOD, "M": theme.WARN, "H": theme.BAD}
+
+
+def draw_stars(p, x, y, stars, size=12, gap=2):
+    for i in range(3):
+        p.drawPixmap(round(x + i * (size + gap)), round(y),
+                     icon("star", theme.WARN if i < stars else theme.FAINT, size))
+
+
+def draw_grade(p, x, y, letter, size=16):
+    """The difficulty grade, E, M or H, as a small colored badge."""
+    color = DIFFICULTY_COLORS[letter]
+    p.setPen(Qt.NoPen)
+    p.setBrush(qc(color))
+    p.drawRoundedRect(QRectF(x, y, size, size), 4, 4)
+    f = p.font()
+    f.setBold(True)
+    f.setPointSizeF(size * 0.5)
+    p.save()
+    p.setFont(f)
+    p.setPen(qc(theme.BG))
+    p.drawText(QRectF(x, y, size, size), Qt.AlignCenter, letter)
+    p.restore()

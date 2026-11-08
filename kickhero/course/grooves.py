@@ -106,6 +106,11 @@ class GrooveLesson:
         return f"{self.meter}  ·  {self.density}".rstrip(" ·")
 
     @property
+    def card_title(self):
+        """The title on its card, which sits under its level's heading: "Groove 14" or "Fill 3"."""
+        return self.title.split(" · ", 1)[-1]
+
+    @property
     def odd_time(self):
         return self.meter.replace(" ", "") != "4/4"
 
@@ -117,7 +122,13 @@ class GrooveLesson:
     def difficulty(self):
         """How hard it is to play: the lesson's difficulty (hand and kick speed, limbs at once, fills,
         syncopation...), plus a step for odd time signatures."""
-        return self.to_lesson().difficulty_score() + (1.5 if self.odd_time else 0)
+        return self.rating().score + (1.5 if self.odd_time else 0)
+
+    def rating(self):
+        """The lesson's Rating (E/M/H, why), worked out once."""
+        if "_rating" not in self.__dict__:
+            self.__dict__["_rating"] = self.to_lesson().rating()
+        return self.__dict__["_rating"]
 
     def to_lesson(self):
         """The groove, repeated until the lesson is MIN_BARS bars long (twice at least)."""
