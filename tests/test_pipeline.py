@@ -72,6 +72,19 @@ def test_progress_best_and_streak(tmp_path):
     assert p.best("other.mid") is None
 
 
+def test_wait_mode_runs_count_for_the_streak_but_not_the_best(tmp_path):
+    p = Progress(tmp_path / "p.db")
+    today = dt.date(2026, 11, 6)
+    p.record("song.mid", 1.0, {"accuracy": 1.0, "stars": 3}, when=dt.datetime.combine(today, dt.time(12)),
+             assisted=True)
+    assert p.best("song.mid") is None and not p.passed("song.mid")
+    assert p.streak(today) == 1
+    p.record("song.mid", 1.0, {"accuracy": 0.8, "stars": 2})
+    assert p.best("song.mid")[:2] == (2, 0.8) and p.passed("song.mid")
+    p.db.close()
+    assert Progress(tmp_path / "p.db").best("song.mid")[:2] == (2, 0.8)  # reopening keeps the column
+
+
 def test_hits_are_placed_where_they_rise_not_in_the_quiet_before():
     import numpy as np
 
@@ -90,3 +103,39 @@ def test_hits_are_placed_where_they_rise_not_in_the_quiet_before():
     found = detect_hits(y, sr, 0.07, -30, 30)[0]
     assert len(found) == len(times)
     assert np.abs(found - times).max() < 0.006
+
+
+def test_history_lists_counted_runs_oldest_first(tmp_path):
+    p = Progress(tmp_path / "p.db")
+    day = dt.datetime(2026, 11, 6, 12)
+    for i, (acc, assisted) in enumerate([(0.5, False), (1.0, True), (0.7, False)]):
+        p.record("song.mid", 1.0, {"accuracy": acc, "stars": 1}, when=day + dt.timedelta(minutes=i), assisted=assisted)
+    assert [r[1] for r in p.history("song.mid")] == [0.5, 0.7]
+    assert [r[1] for r in p.history("song.mid", limit=1)] == [0.7]
+
+
+def test_practice_time_days_played_and_recent(tmp_path):
+    p = Progress(tmp_path / "p.db")
+    day = dt.date(2026, 11, 6)
+    at = lambda d, h=12: dt.datetime.combine(d, dt.time(h))  # noqa: E731
+    p.add_time(90, when=at(day))
+    p.add_time(30, when=at(day, 23))
+    p.add_time(45, when=at(day - dt.timedelta(days=2)))
+    assert p.seconds_on(day) == 120 and p.seconds_on(day - dt.timedelta(days=1)) == 0
+    p.record("a.mid", 1.0, {"accuracy": 0.5, "stars": 1}, when=at(day - dt.timedelta(days=4)))
+    p.record("b.mid", 1.0, {"accuracy": 0.5, "stars": 1}, when=at(day - dt.timedelta(days=1)))
+    p.record("a.mid", 1.0, {"accuracy": 0.6, "stars": 1}, when=at(day))
+    assert p.days_played(day - dt.timedelta(days=3), day) == {day, day - dt.timedelta(days=1),
+                                                             day - dt.timedelta(days=2)}
+    assert [k for k, _ in p.recent()] == ["a.mid", "b.mid"]
+
+
+def test_home_helpers():
+    from kickhero.ui.home import ago, greeting
+
+    assert [greeting(h) for h in (7, 13, 21, 2)] == ["Good morning", "Good afternoon", "Good evening",
+                                                    "Good evening"]
+    today = dt.date(2026, 11, 8)
+    assert ago("2026-11-08T09:00:00", today) == "today"
+    assert ago("2026-11-07T23:00:00", today) == "yesterday"
+    assert ago("2026-11-01T10:00:00", today) == "7 days ago"

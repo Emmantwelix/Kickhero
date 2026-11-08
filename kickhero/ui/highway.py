@@ -140,7 +140,7 @@ class Highway(QWidget):
         p.setRenderHint(QPainter.Antialiasing)
         w, h = self.width(), self.height()
         grad = QLinearGradient(0, 0, 0, h)
-        grad.setColorAt(0, QColor("#161927"))
+        grad.setColorAt(0, QColor(theme.PANEL))
         grad.setColorAt(1, QColor(theme.BG))
         p.fillRect(self.rect(), grad)
         if not self.lesson:

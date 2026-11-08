@@ -13,11 +13,27 @@ from ..engine.session import Session
 from ..engine.sounds import CUSTOM, KITS, SAMPLE_EXTS, match_kit_folder
 from ..kit.calibration import measure_latency
 from ..kit.mapping import KitMap
-from ..lanes import LANE_COLORS, LANE_NAMES, LANES, SOUND_NAMES, SOUNDS
+from ..lanes import LANE_COLORS, LANE_NAMES, LANES, OPEN_HAT, SOUND_NAMES, SOUNDS
 from . import theme
 
 CAL_BPM = 100
 CAL_BARS = 4
+
+HIT_ZONES = "a few times, on every zone (head, rim, edge, bell)"
+
+# Pad setup steps: (tile lit, what the notes heard are learned as, instruction)
+WIZARD_STEPS = []
+for _lane in LANES:
+    if _lane == "hihat":
+        WIZARD_STEPS += [
+            ("hihat", "hihat", "keep the hi-hat pedal pressed down and hit your CLOSED HI-HAT " + HIT_ZONES + "."),
+            ("hihat", OPEN_HAT, "lift your foot off the hi-hat pedal and hit your OPEN HI-HAT " + HIT_ZONES + ". "
+                                "Skip this if you have no hi-hat pedal."),
+            ("hihat", "", "press the HI-HAT PEDAL down with your foot a few times (the \"chick\"), without hitting "
+                          "anything. Skip this if you have no hi-hat pedal."),
+        ]
+    else:
+        WIZARD_STEPS.append((_lane, _lane, f"hit your {LANE_NAMES[_lane].upper()} {HIT_ZONES}."))
 
 
 def card(title, subtitle=""):
@@ -29,6 +45,19 @@ def card(title, subtitle=""):
     if subtitle:
         lay.addWidget(QLabel(subtitle, objectName="muted", wordWrap=True))
     return f, lay
+
+
+def wizard_step_for(heard, note, step, velocity):
+    """Record a pad-setup hit and return the step the note belongs to: the one where it was hit the most
+    (then the loudest, then the earliest). A stray hit or crosstalk from another pad can't steal a note."""
+    hits, loudest = heard.setdefault(note, {}).get(step, (0, 0))
+    heard[note][step] = (hits + 1, max(loudest, velocity))
+    return max(heard[note], key=lambda st: (*heard[note][st], -st))
+
+
+def wizard_step_name(step):
+    tile_lane, learn_as, _ = WIZARD_STEPS[step]
+    return {OPEN_HAT: "Open hi-hat", "": "Hi-hat pedal"}.get(learn_as, LANE_NAMES[tile_lane])
 
 
 class PadTile(QFrame):
@@ -49,7 +78,7 @@ class PadTile(QFrame):
 
     def set_state(self, state):
         c = LANE_COLORS[self.lane]
-        bg = {"normal": theme.PANEL_2, "lit": c, "target": "#3a3150"}[state]
+        bg = {"normal": theme.PANEL_2, "lit": c, "target": theme.SELECT}[state]
         border = c if state != "normal" else theme.BORDER
         self.setStyleSheet(f"PadTile {{ background: {bg}; border: 2px solid {border}; border-radius: 10px; }}")
         self.name.setStyleSheet(f"font-weight: 600; color: {'#14161f' if state == 'lit' else theme.TEXT};")
@@ -63,7 +92,8 @@ class KitPage(QWidget):
     def __init__(self, ctx, parent=None):
         super().__init__(parent)
         self.ctx = ctx
-        self.wizard_lane = None
+        self.wizard_step = None  # index into WIZARD_STEPS while the pad setup runs
+        self.wizard_heard = {}   # note -> {step: (hits, loudest velocity)} during this pad setup
         self.cal = None  # running calibration: dict
 
         outer = QVBoxLayout(self)
@@ -243,50 +273,64 @@ class KitPage(QWidget):
         kit = self.ctx.kit
         for lane, tile in self.tiles.items():
             notes = kit.notes_for(lane)
-            tile.notes.setText("notes " + ", ".join(map(str, notes[:6])) + ("..." if len(notes) > 6 else "")
-                               if notes else "not set")
+            text = ("notes " + ", ".join(map(str, notes[:6])) + ("..." if len(notes) > 6 else "")
+                    if notes else "not set")
+            if lane == "hihat" and kit.notes_for(OPEN_HAT):
+                text += "\nopen " + ", ".join(map(str, kit.notes_for(OPEN_HAT)[:4]))
+            tile.notes.setText(text)
 
     def on_note(self, note, velocity, perf, lane):
         """Every incoming kit note (raw), whether or not it's mapped."""
-        if self.wizard_lane:
-            self.ctx.kit.learn(note, self.wizard_lane)
+        if self.wizard_step is not None:
+            step = wizard_step_for(self.wizard_heard, note, self.wizard_step, velocity)
+            tile_lane, learn_as, _ = WIZARD_STEPS[step]
+            self.ctx.kit.learn(note, learn_as)
             self.ctx.save_kit()
             self._refresh_notes()
-            lane = self.wizard_lane
+            lane = tile_lane if learn_as else ""
+            if step != self.wizard_step:  # a stray hit (or crosstalk) on a pad set up in another step
+                self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  kept as "
+                                  f"{wizard_step_name(step)} (you played it more in that step)")
+                if lane:
+                    self.tiles[lane].blink()
+                return
         if self.cal is not None:
             self.cal["hits"].append(perf)
         if lane:
             self.tiles[lane].blink()
-            self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  {LANE_NAMES[lane]}")
+            name = "Open hi-hat" if self.ctx.kit.is_open_hat(note) else LANE_NAMES[lane]
+            self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  {name}")
         elif lane == "":
             self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  ignored (hi-hat pedal)")
         else:
             self.last.setText(f"Last hit: note {note}, velocity {velocity}  →  not assigned. Run the pad setup.")
 
     def start_wizard(self):
+        self.wizard_heard = {}
         self._show_wizard_buttons(True)
         self._wizard_goto(0)
 
     def _wizard_goto(self, i):
         for t in self.tiles.values():
             t.set_state("normal")
-        if i >= len(LANES):
+        if i >= len(WIZARD_STEPS):
             self.end_wizard()
             return
-        self.wizard_lane = LANES[i]
-        self.tiles[self.wizard_lane].set_state("target")
-        self.wizard_text.setText(f"Step {i + 1} of {len(LANES)}: hit your {LANE_NAMES[self.wizard_lane].upper()} "
-                                 "a few times, on every zone (head, rim, edge, bell). Then press Next drum.")
+        self.wizard_step = i
+        tile_lane, _, text = WIZARD_STEPS[i]
+        self.tiles[tile_lane].set_state("target")
+        self.wizard_text.setText(f"Step {i + 1} of {len(WIZARD_STEPS)}: {text[0].upper()}{text[1:]} "
+                                 "Then press Next drum.")
         self.wizard_text.show()
 
     def wizard_next(self):
-        self._wizard_goto(LANES.index(self.wizard_lane) + 1)
+        self._wizard_goto(self.wizard_step + 1)
 
     def wizard_skip(self):
         self.wizard_next()
 
     def end_wizard(self):
-        self.wizard_lane = None
+        self.wizard_step = None
         self.wizard_text.hide()
         for t in self.tiles.values():
             t.set_state("normal")

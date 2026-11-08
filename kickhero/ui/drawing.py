@@ -61,7 +61,7 @@ def open_mark(p, x, bottom, size):
 
 def icon(name, color, size=16):
     """A small line icon as a QPixmap (instead of emoji, which look different on every system):
-    lock, check, flame, note, dot."""
+    lock, check, flame, note, gear, dot, and the outline icons in _line_icon."""
     from PySide6.QtGui import QGuiApplication, QPainter, QPainterPath, QPixmap
 
     dpr = QGuiApplication.primaryScreen().devicePixelRatio() if QGuiApplication.primaryScreen() else 1.0
@@ -120,8 +120,111 @@ def icon(name, color, size=16):
         p.setPen(Qt.NoPen)
         p.setBrush(qc(color))
         p.drawEllipse(QRectF(4 * s, 4 * s, 8 * s, 8 * s))
+    else:
+        _line_icon(p, name, s, color)
     p.end()
     return pm
+
+
+def _line_icon(p, name, s, color):
+    """The outline icons (navigation and transport), on the same 16 x 16 grid as icon()."""
+    pt = lambda x, y: QPointF(x * s, y * s)  # noqa: E731
+    fill = lambda: (p.setPen(Qt.NoPen), p.setBrush(qc(color)))  # noqa: E731
+    if name == "home":
+        p.drawPolyline([pt(2, 7.5), pt(8, 2.5), pt(14, 7.5)])
+        p.drawPolyline([pt(3.8, 6.3), pt(3.8, 13.5), pt(12.2, 13.5), pt(12.2, 6.3)])
+        p.drawLine(pt(8, 13.5), pt(8, 10))
+    elif name == "songs":  # a list with a note
+        for y in (3.5, 7, 10.5):
+            p.drawLine(pt(2, y), pt(8.5, y))
+        p.drawLine(pt(12.5, 3), pt(12.5, 11.5))
+        p.drawLine(pt(12.5, 3), pt(14.5, 4.2))
+        fill()
+        p.drawEllipse(QRectF(9 * s, 10.3 * s, 3.8 * s, 3.2 * s))
+    elif name == "course":  # a path of steps
+        p.drawPolyline([pt(2, 13.5), pt(6, 13.5), pt(6, 9.5), pt(10, 9.5), pt(10, 5.5), pt(14, 5.5)])
+        fill()
+        p.drawEllipse(QRectF(12.2 * s, 1.5 * s, 3 * s, 3 * s))
+    elif name == "groove":  # a wave
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath(pt(1.5, 8))
+        path.cubicTo(pt(3.5, 2), pt(5.5, 2), pt(6.5, 8))
+        path.cubicTo(pt(7.5, 14), pt(9.5, 14), pt(10.5, 8))
+        path.cubicTo(pt(11.2, 4.5), pt(13, 4.5), pt(14.5, 8))
+        p.drawPath(path)
+    elif name == "kit":  # a drum with sticks
+        p.drawEllipse(QRectF(2.5 * s, 6 * s, 11 * s, 3.5 * s))
+        p.drawLine(pt(2.5, 7.8), pt(2.5, 12))
+        p.drawLine(pt(13.5, 7.8), pt(13.5, 12))
+        p.drawArc(QRectF(2.5 * s, 10.2 * s, 11 * s, 3.5 * s), 180 * 16, 180 * 16)
+        p.drawLine(pt(5, 1.5), pt(7.5, 6.5))
+        p.drawLine(pt(11, 1.5), pt(8.5, 6.5))
+    elif name == "play":
+        fill()
+        p.drawPolygon([pt(4.5, 2.5), pt(13.5, 8), pt(4.5, 13.5)])
+    elif name == "pause":
+        fill()
+        p.drawRoundedRect(QRectF(3.5 * s, 2.5 * s, 3 * s, 11 * s), s, s)
+        p.drawRoundedRect(QRectF(9.5 * s, 2.5 * s, 3 * s, 11 * s), s, s)
+    elif name == "stop":
+        fill()
+        p.drawRoundedRect(QRectF(3.5 * s, 3.5 * s, 9 * s, 9 * s), 1.5 * s, 1.5 * s)
+    elif name == "loop":
+        p.drawArc(QRectF(2 * s, 3 * s, 12 * s, 10 * s), 30 * 16, 150 * 16)
+        p.drawArc(QRectF(2 * s, 3 * s, 12 * s, 10 * s), 210 * 16, 150 * 16)
+        p.drawPolyline([pt(10.5, 2.5), pt(13.2, 4.8), pt(10.8, 6.8)])
+        p.drawPolyline([pt(5.5, 13.5), pt(2.8, 11.2), pt(5.2, 9.2)])
+    elif name == "metronome":
+        p.drawPolygon([pt(5.5, 2), pt(10.5, 2), pt(13, 14), pt(3, 14)])
+        p.drawLine(pt(8, 11), pt(12, 4))
+        p.drawLine(pt(4, 11), pt(12, 11))
+    elif name == "speaker":
+        p.drawPolygon([pt(2, 6), pt(5, 6), pt(9, 2.5), pt(9, 13.5), pt(5, 10), pt(2, 10)])
+        p.drawArc(QRectF(8 * s, 5 * s, 4.5 * s, 6 * s), -60 * 16, 120 * 16)
+        p.drawArc(QRectF(8 * s, 2.5 * s, 7 * s, 11 * s), -60 * 16, 120 * 16)
+    elif name == "wait":  # an hourglass
+        p.drawPolyline([pt(4, 2), pt(12, 2), pt(4, 14), pt(12, 14), pt(4, 2)])
+    elif name == "plus":
+        p.drawLine(pt(8, 3), pt(8, 13))
+        p.drawLine(pt(3, 8), pt(13, 8))
+    elif name == "edit":  # a pencil
+        p.drawPolygon([pt(10.5, 2.5), pt(13.5, 5.5), pt(5.5, 13.5), pt(2.5, 13.5), pt(2.5, 10.5)])
+        p.drawLine(pt(9, 4), pt(12, 7))
+    elif name == "search":
+        p.drawEllipse(QRectF(2.5 * s, 2.5 * s, 8 * s, 8 * s))
+        p.drawLine(pt(9.5, 9.5), pt(13.5, 13.5))
+    elif name == "back":
+        p.drawLine(pt(13, 8), pt(3, 8))
+        p.drawPolyline([pt(7.5, 3.5), pt(3, 8), pt(7.5, 12.5)])
+    elif name == "more":
+        fill()
+        for x in (3.5, 8, 12.5):
+            p.drawEllipse(QRectF((x - 1.3) * s, 6.7 * s, 2.6 * s, 2.6 * s))
+    elif name == "help":
+        p.drawEllipse(QRectF(1.8 * s, 1.8 * s, 12.4 * s, 12.4 * s))
+        p.drawArc(QRectF(6 * s, 4.3 * s, 4 * s, 4 * s), -40 * 16, 220 * 16)
+        p.drawLine(pt(8, 8.6), pt(8, 9.6))
+        fill()
+        p.drawEllipse(QRectF(7.2 * s, 10.8 * s, 1.6 * s, 1.6 * s))
+    elif name == "star":
+        import math
+        fill()
+        p.drawPolygon([pt(8 + (6.5 if k % 2 == 0 else 2.8) * math.sin(k * math.pi / 5),
+                          8.6 - (6.5 if k % 2 == 0 else 2.8) * math.cos(k * math.pi / 5)) for k in range(10)])
+    elif name == "close":  # an x
+        p.drawLine(pt(4, 4), pt(12, 12))
+        p.drawLine(pt(12, 4), pt(4, 12))
+    elif name == "folder":
+        p.drawPolyline([pt(2, 13), pt(2, 3.5), pt(6, 3.5), pt(7.5, 5.5), pt(14, 5.5), pt(14, 13), pt(2, 13)])
+    elif name == "sliders":  # settings
+        for y, x in ((4, 10), (8, 5), (12, 11)):
+            p.drawLine(pt(2, y), pt(14, y))
+            p.save()
+            fill()
+            p.drawEllipse(QRectF((x - 1.8) * s, (y - 1.8) * s, 3.6 * s, 3.6 * s))
+            p.restore()
+    else:
+        raise ValueError(f"no icon {name!r}")
 
 
 def speaker(p, rect, muted):

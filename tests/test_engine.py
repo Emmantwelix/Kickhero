@@ -7,6 +7,7 @@ from kickhero.engine.lesson import from_notes
 from kickhero.engine.session import Session
 from kickhero.kit.calibration import measure_latency
 from kickhero.kit.mapping import KitMap
+from kickhero.lanes import OPEN_HAT
 
 BPM = 120  # beat = 0.5 s, bar = 2 s
 
@@ -251,7 +252,6 @@ def test_keyboard_hits_never_rate_dynamics():
 
 # ---------- open hi-hat ----------
 
-from kickhero.kit.mapping import hat_open  # noqa: E402
 
 
 def open_and4(bars=2):
@@ -285,12 +285,32 @@ def test_open_hihat_is_rated_when_the_kit_can_tell():
 
 
 def test_hat_open_from_kit_notes_and_pedal():
-    assert hat_open(46) is True and hat_open(26) is True
-    assert hat_open(42) is None                    # a kit that never sent an open note may have no pedal
-    assert hat_open(42, kit_opens=True) is False
-    assert hat_open(42, pedal=127) is False
-    assert hat_open(99, pedal=10) is True and hat_open(99, pedal=120) is False  # custom note: pedal decides
-    assert hat_open(99) is None
+    kit = KitMap()
+    assert kit.hat_open(46) is True and kit.hat_open(26) is True
+    assert kit.lane_for(46) == "hihat"
+    assert kit.hat_open(42) is None                    # a kit that never sent an open note may have no pedal
+    assert kit.hat_open(42, seen_open=True) is False
+    assert kit.hat_open(42, pedal=127) is False
+    assert kit.hat_open(99, pedal=10) is True and kit.hat_open(99, pedal=120) is False  # pedal decides
+    assert kit.hat_open(99) is None
+
+
+def test_kit_with_its_own_open_and_closed_hat_notes():
+    # a kit whose module sends 99 for a closed hat, 65 for an open one and 62 for the pedal chick
+    kit = KitMap()
+    kit.learn(99, "hihat")
+    kit.learn(65, OPEN_HAT)
+    kit.learn(62, "")
+    kit = KitMap.from_json(kit.to_json())
+    assert kit.lane_for(99) == kit.lane_for(65) == "hihat" and kit.lane_for(62) == ""
+    assert kit.hat_open(65) is True
+    assert kit.hat_open(99) is False                   # learned open note: no need to see one first
+
+
+def test_old_saved_kits_keep_gm_open_hats():
+    old = {"42": "hihat", "46": "hihat", "44": ""}
+    kit = KitMap.from_json(old)
+    assert kit.hat_open(46) is True and kit.hat_open(42) is None
 
 
 def test_muted_lanes_are_never_played_back():
@@ -317,3 +337,64 @@ def test_muted_lanes_are_never_played_back():
     drums = eng.bank.drums
     assert any(x is drums["kick"] for x in played)
     assert not any(x is drums["hihat"] or x is drums["snare"] for x in played)
+
+
+def test_pad_setup_ignores_a_stray_hit_in_a_later_step():
+    from kickhero.ui.kit_setup import WIZARD_STEPS, wizard_step_for
+    hat = next(i for i, st in enumerate(WIZARD_STEPS) if st[1] == "hihat")
+    snare = next(i for i, st in enumerate(WIZARD_STEPS) if st[1] == "snare")
+    heard = {}
+    for v in (90, 100, 95):
+        assert wizard_step_for(heard, 99, hat, v) == hat
+    assert wizard_step_for(heard, 99, snare, 40) == hat      # crosstalk while setting up the snare
+    for v in (100, 110):
+        assert wizard_step_for(heard, 38, snare, v) == snare
+    heard = {}
+    wizard_step_for(heard, 50, hat, 30)                         # one accidental hit...
+    for v in (90, 100):
+        assert wizard_step_for(heard, 50, snare, v) == snare  # ...then the right pad wins
+
+
+def _groove(bars, bpm=100, extra=lambda bar, t0, beat: []):
+    """Bars of a plain 8th-note rock beat, plus extra notes per bar."""
+    beat, notes = 60 / bpm, []
+    for b in range(bars):
+        t0 = b * 4 * beat
+        notes += [(t0 + i * beat / 2, "hihat", 100) for i in range(8)]
+        notes += [(t0, "kick", 100), (t0 + 2 * beat, "kick", 100)]
+        notes += [(t0 + beat, "snare", 100), (t0 + 3 * beat, "snare", 100)]
+        notes += extra(b, t0, beat)
+    return from_notes("g", bpm, notes)
+
+
+def test_difficulty_rates_the_hardest_bars_not_the_average():
+    plain = _groove(16)
+    sparse_intro = from_notes("s", 100, [(i * 2.4, "hihat", 100) for i in range(8)]
+                              + [(n.t + 19.2, n.lane, n.velocity) for n in _groove(16).notes])
+    assert sparse_intro.difficulty_score() > plain.difficulty_score() * 0.9  # a quiet intro barely dilutes it
+    fills = _groove(16, extra=lambda b, t0, beat: [(t0 + 3 * beat + i * beat / 8, lane, 100)  # 32nd tom runs
+                                                   for i, lane in enumerate(["snare", "tom1", "tom2", "tom3"] * 2)]
+                    if b % 4 == 3 else [])
+    assert fills.difficulty() > plain.difficulty()
+
+
+def test_difficulty_counts_double_kicks_syncopation_ghosts_and_open_hats():
+    plain = _groove(8).difficulty_score()
+    doubles = _groove(8, extra=lambda b, t0, beat: [(t0 + beat / 4, "kick", 100), (t0 + 2.25 * beat, "kick", 100)])
+    ghosts = _groove(8, extra=lambda b, t0, beat: [(t0 + (k + 0.75) * beat, "snare", 40) for k in range(4)])
+    opens = _groove(8, extra=lambda b, t0, beat: [(t0 + 3.5 * beat, "hihat", 100, True)])
+    for harder in (doubles, ghosts, opens):
+        assert harder.difficulty_score() > plain
+    assert from_notes("e", 80, []).difficulty() == 1
+
+
+def test_rating_grade_and_reasons():
+    from kickhero.engine.difficulty import grade
+    assert [grade(n)[0] for n in (1, 3, 4, 6, 7, 10)] == ["E", "E", "M", "M", "H", "H"]
+    simple = from_notes("q", 70, [(i * 60 / 70, "snare", 100) for i in range(16)]).rating()
+    assert simple.grade == "E" and simple.reasons == ()
+    fills = _groove(16, bpm=120, extra=lambda b, t0, beat: [(t0 + 3 * beat + i * beat / 8, lane, 100)
+                                                            for i, lane in enumerate(["snare", "tom1", "tom2", "tom3"] * 2)]
+                    if b % 4 == 3 else []).rating()
+    assert "Fills around the toms" in fills.reasons
+    assert fills.hardest == 3 * 4 * 0.5                       # the first bar with a fill

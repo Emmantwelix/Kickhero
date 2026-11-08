@@ -120,6 +120,29 @@ def test_wrong_recording_is_not_a_clear_fit(tmp_path):
     assert rate - off < mi.CLEAR_LEAD
 
 
+def test_sound_check_tells_kicks_from_snares():
+    """Kick and snare on alternate beats match a recording as well a beat off; the sound of the hits
+    under them settles it: low thumps under the kicks, noise bursts under the snares."""
+    sr, beat = 22050, 0.5
+    rnd = np.random.default_rng(0)
+    y = np.zeros(sr * 40, dtype=np.float32)
+    env = np.exp(-np.arange(int(0.08 * sr)) / (0.02 * sr))
+    t = np.arange(4.0, 36.0, beat)
+    lanes = ["kick" if i % 2 == 0 else "snare" for i in range(len(t))]
+    for ti, lane in zip(t, lanes):
+        n = len(env)
+        hit = np.sin(2 * np.pi * 60 * np.arange(n) / sr) if lane == "kick" else rnd.standard_normal(n)
+        y[int(ti * sr):int(ti * sr) + n] += 0.5 * env * hit
+    times = t + rnd.uniform(-0.005, 0.005, len(t))
+    tilt = mi.hit_tilt(y, sr, times)
+    placed, moved = mi.sound_check(t, lanes, times, tilt, beat)
+    assert placed - moved >= mi.SOUND_LEAD
+    assert mi.fit_verdict(0.95, 0.94, (placed, moved)) == "good"
+    assert mi.fit_verdict(0.94, 0.95, mi.sound_check(t + beat, lanes, times, tilt, beat)) == "beat_off"
+    assert mi.fit_verdict(0.95, 0.94, None) == "unclear"
+    assert mi.fit_verdict(0.95, 0.80, None) == "good"
+
+
 def test_drums_model_is_picked_from_the_bag():
     """MIDI mode runs only htdemucs_ft's drum model; this hooks into the separator library's loader."""
     from audio_separator.separator.architectures import demucs_separator

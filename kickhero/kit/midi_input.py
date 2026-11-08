@@ -24,7 +24,6 @@ class MidiInput(QObject):
         import rtmidi
 
         self._rtmidi = rtmidi
-        self._lister = rtmidi.MidiIn()
         self._port = None
         self.port_name = ""
         self.preferred = preferred
@@ -35,7 +34,10 @@ class MidiInput(QObject):
 
     def rescan(self):
         try:
-            ports = self._lister.get_ports()
+            # a new MidiIn each time: on Windows one kept from startup may never list a kit plugged in later
+            lister = self._rtmidi.MidiIn()
+            ports = lister.get_ports()
+            lister.delete()
         except Exception:
             ports = []
         if ports != self.ports:

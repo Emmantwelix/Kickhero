@@ -192,14 +192,17 @@ def process_song(song, args):
         has_backing = write_backing([f for f in outs if f not in drum_files], backing)
 
     if args.midi:
-        from .midi_import import import_aligned
+        from .midi_import import fit_verdict, import_aligned
 
         print("[2/2] Lining up the MIDI file with the song...")
-        _, (rate, off) = import_aligned(args.midi, drums_wav, song_dir, name,
+        _, (rate, off, sound) = import_aligned(args.midi, drums_wav, song_dir, name,
                                         backing=backing.name if has_backing else None,
                                         source=str(Path(song).resolve()))
         print(f"{rate:.0%} of the MIDI's kick and snare notes line up with drums heard in the song "
               f"({off:.0%} a beat off)")
+        if sound:
+            print(f"Kick notes sound {sound[0]:+.2f} bassier than the others ({sound[1]:+.2f} a beat off)")
+        print(f"Fit: {fit_verdict(rate, off, sound)}")
         shutil.rmtree(work, ignore_errors=True)
         shutil.rmtree(kit_dir, ignore_errors=True)
         if not args.keep_stems:

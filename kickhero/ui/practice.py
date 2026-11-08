@@ -1,19 +1,22 @@
-"""Practice screen: controls, the scrolling lanes, keyboard drumming and the results panel."""
+"""Practice screen: the lanes (with the song's progress strip on top), a transport bar at the bottom,
+keyboard drumming and the results screen. Two modes: Practice (any speed, loops, wait mode) and Perform
+(the whole song at 100% with no aids: the run that shows what you can play)."""
 
 import time
 
-from PySide6.QtCore import QPoint, Qt, QTimer, Signal
-from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QButtonGroup, QComboBox, QFrame, QHBoxLayout, QLabel, QPushButton, QSlider,
-                               QVBoxLayout, QWidget)
+from PySide6.QtCore import QPoint, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtGui import QActionGroup, QFont, QPainter
+from PySide6.QtWidgets import (QFrame, QGridLayout, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider,
+                               QToolButton, QVBoxLayout, QWidget)
 
 from ..engine.lesson import load_midi
 from ..engine.session import Session
 from ..lanes import LANE_NAMES
 from . import theme
-from .drawing import icon
+from .drawing import icon, qc
+from .fitting import ElidedLabel
 from .highway import Highway
-from .fitting import ElidedLabel, FlowRow
+from .widgets import Popover, Segmented, StatRing, icon_button, state_icon
 
 # Play without a kit: keyboard keys as pads
 KEY_LANES = {
@@ -24,50 +27,72 @@ KEY_LANES = {
 SPEEDS = [("Slow", 0.5), ("Medium", 0.75), ("Normal", 1.0), ("Max", 1.25)]
 SPEED_KEYS = {Qt.Key_1: 0, Qt.Key_2: 1, Qt.Key_3: 2, Qt.Key_4: 3}
 GRADE_TEXT = {"perfect": "Perfect", "good": "Good", "ok": "OK", "extra": "Extra hit"}
+HELP_KEYS = [("Enter", "Start / stop"), ("Esc", "Stop"), ("1 – 4", "Slow, Medium, Normal, Max speed"),
+             ("Space", "Kick"), ("J", "Snare"), ("K", "Hi-hat"), ("L", "Ride"), ("U", "Crash"), ("I  O  P", "Toms")]
+HELP_MOUSE = ["Drag across the bar numbers above the lanes to loop those bars (double-click to clear)",
+              "Click a drum's name to leave it out, its speaker to mute its sound"]
+
+CONTROL_H = 36      # every control in the transport bar
+COMPACT_W = 1180    # narrower than this, the transport's toggles show icons only (their names in tooltips)
+
+PLAY_CSS = f"""
+QPushButton#play {{ background: {theme.ACCENT}; border: none; border-radius: 26px; padding: 0; }}
+QPushButton#play:hover {{ background: {theme.ACCENT_HOVER}; }}
+QPushButton#play:pressed {{ background: #e86a4b; }}
+"""
 
 
-def toggle(text, checked=False, tip=""):
-    b = QPushButton(text)
-    b.setCheckable(True)
-    b.setChecked(checked)
-    b.setToolTip(tip)
-    b.setFocusPolicy(Qt.NoFocus)
-    return b
-
-
-LEAD_W = 128    # Start and the back button: the same width, so the song title lines up above Speed
-TOOL_GAP = 8    # between toolbar items
-GROUP_GAP = 16  # extra space between toolbar groups
-
-
-def group(title, *widgets):
-    """A labelled group of controls that stays on one line when the toolbar wraps."""
+def labelled(title, *widgets):
+    """Controls under a small caps heading, kept together on one line."""
     box = QWidget()
-    lay = QHBoxLayout(box)
-    lay.setContentsMargins(0, 0, 0, 0)
-    lay.setSpacing(6)
-    label = QLabel(title, objectName="group")
-    lay.addWidget(label)
-    lay.addSpacing(2)
+    v = QVBoxLayout(box)
+    v.setContentsMargins(0, 0, 0, 0)
+    v.setSpacing(5)
+    v.addWidget(QLabel(title.upper(), objectName="group"))
+    row = QHBoxLayout()
+    row.setSpacing(6)
     for w in widgets:
-        lay.addWidget(w)
+        row.addWidget(w)
+    v.addLayout(row)
     return box
 
 
-class SpeedPopup(QFrame):
-    """A slider for any speed (30-150%, in 5% steps), opened from the gear after the speed buttons."""
+def menu_button(icon_name, text, tip):
+    """A toolbar button that opens a menu of settings."""
+    b = QToolButton()
+    b.setText(text + "  ▾")
+    b.setIcon(state_icon(icon_name))
+    b.setIconSize(QSize(16, 16))
+    b.setToolTip(tip)
+    b.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    b.setPopupMode(QToolButton.InstantPopup)
+    b.setFocusPolicy(Qt.NoFocus)
+    b.setCursor(Qt.PointingHandCursor)
+    b.setMenu(QMenu(b))
+    return b
+
+
+def setting(menu, text, tip="", checked=False):
+    """A checkable menu item (works like a toggle button: toggled, isChecked, setVisible...)."""
+    a = menu.addAction(text)
+    a.setCheckable(True)
+    a.setChecked(checked)
+    a.setToolTip(tip)
+    return a
+
+
+class SpeedPopup(Popover):
+    """A slider for any speed (30-150%, in 5% steps), opened from the button after the speed choices."""
 
     changed = Signal(float)
 
     def __init__(self, speed, parent=None):
-        super().__init__(parent, Qt.Popup)
-        self.setObjectName("card")
-        self.setAttribute(Qt.WA_DeleteOnClose)
+        super().__init__(parent)
         lay = QVBoxLayout(self)
         lay.setContentsMargins(16, 12, 16, 12)
         lay.setSpacing(8)
         row = QHBoxLayout()
-        row.addWidget(QLabel("Speed", objectName="group"))
+        row.addWidget(QLabel("ANY SPEED", objectName="group"))
         row.addStretch()
         self.value = QLabel()
         self.value.setStyleSheet("font-weight: 600;")
@@ -82,7 +107,7 @@ class SpeedPopup(QFrame):
         lay.addWidget(self.slider)
         ends = QHBoxLayout()
         for text in ("30%", "100%", "150%"):
-            ends.addWidget(QLabel(text, objectName="muted"))
+            ends.addWidget(QLabel(text, objectName="caption"))
             if text != "150%":
                 ends.addStretch()
         lay.addLayout(ends)
@@ -96,7 +121,90 @@ class SpeedPopup(QFrame):
         self.changed.emit(v / 20)
 
 
-class ResultsPanel(QFrame):
+class HelpPopup(Popover):
+    """Keys and mouse tips (instead of a line of small print under the lanes)."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        lay = QVBoxLayout(self)
+        lay.setContentsMargins(18, 14, 18, 16)
+        lay.setSpacing(8)
+        lay.addWidget(QLabel("KEYS", objectName="group"))
+        grid = QGridLayout()
+        grid.setHorizontalSpacing(14)
+        grid.setVerticalSpacing(5)
+        for i, (key, what) in enumerate(HELP_KEYS):
+            k = QLabel(key)
+            k.setStyleSheet(f"background: {theme.PANEL_2}; border: 1px solid {theme.BORDER}; border-radius: 5px; "
+                            "padding: 2px 8px; font-weight: 600;")
+            grid.addWidget(k, i, 0, Qt.AlignLeft)
+            grid.addWidget(QLabel(what, objectName="muted"), i, 1)
+        lay.addLayout(grid)
+        lay.addWidget(QLabel("No kit? The keys above are your pads.", objectName="caption"))
+        lay.addSpacing(4)
+        lay.addWidget(QLabel("MOUSE", objectName="group"))
+        for tip in HELP_MOUSE:
+            t = QLabel(tip, objectName="muted", wordWrap=True)
+            t.setFixedWidth(330)
+            lay.addWidget(t)
+
+
+class GradeBar(QWidget):
+    """The run's notes as one bar split by grade (perfect, good, OK, missed), extra hits after it."""
+
+    PARTS = [("perfect", "Perfect"), ("good", "Good"), ("ok", "OK"), ("miss", "Missed")]
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.counts = {}
+        self.extras = 0
+        self.setFixedHeight(46)
+        self.setMinimumWidth(300)
+
+    def set_counts(self, counts, extras):
+        self.counts, self.extras = counts, extras
+        self.update()
+
+    def paintEvent(self, _):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        total = sum(self.counts.get(k, 0) for k, _ in self.PARTS) or 1
+        w, x = float(self.width()), 0.0
+        p.setPen(Qt.NoPen)
+        p.setBrush(qc(theme.PANEL_2))
+        p.drawRoundedRect(QRectF(0, 0, w, 10), 5, 5)
+        p.setClipRect(QRectF(0, 0, w, 10))
+        for key, _ in self.PARTS:
+            n = self.counts.get(key, 0)
+            seg = w * n / total
+            if n:
+                p.setBrush(qc(theme.GRADE_COLORS[key]))
+                p.drawRect(QRectF(x, 0, seg + 0.5, 10))
+            x += seg
+        p.setClipping(False)
+        x = 0.0
+        legend = [(label, self.counts.get(key, 0), theme.GRADE_COLORS[key]) for key, label in self.PARTS]
+        legend.append(("Extra", self.extras, theme.MUTED))
+        bold, plain = QFont(p.font()), QFont(p.font())
+        bold.setBold(True)
+        for label, n, color in legend:
+            p.setBrush(qc(color))
+            p.setPen(Qt.NoPen)
+            p.drawEllipse(QRectF(x, 24, 8, 8))
+            x += 13
+            for text, font, pen in ((str(n), bold, theme.TEXT), (label, plain, theme.MUTED)):
+                p.setFont(font)
+                p.setPen(qc(pen))
+                tw = p.fontMetrics().horizontalAdvance(text)
+                p.drawText(QRectF(x, 16, tw + 2, 24), Qt.AlignLeft | Qt.AlignVCenter, text)
+                x += tw + 4
+            x += 14
+        p.end()
+
+
+class ResultsPanel(QWidget):
+    """The end of a run: a dimmed screen with the score card on top."""
+
     retry = Signal()
     retry_slower = Signal()
     closed = Signal()
@@ -104,52 +212,122 @@ class ResultsPanel(QFrame):
 
     def __init__(self, parent):
         super().__init__(parent)
-        self.setObjectName("card")
-        self.setStyleSheet(f"QFrame#card {{ background: {theme.PANEL}; border: 1px solid {theme.ACCENT}; }}")
-        lay = QVBoxLayout(self)
-        lay.setContentsMargins(28, 22, 28, 22)
-        lay.setSpacing(8)
-        self.stars = QLabel(alignment=Qt.AlignCenter)
-        self.stars.setStyleSheet(f"font-size: 30pt; color: {theme.WARN};")
-        self.accuracy = QLabel(alignment=Qt.AlignCenter)
-        self.accuracy.setStyleSheet("font-size: 22pt; font-weight: 700;")
-        self.counts = QLabel(alignment=Qt.AlignCenter)
-        self.counts.setObjectName("muted")
-        self.advice = QLabel(alignment=Qt.AlignCenter, wordWrap=True)
-        for w in (self.stars, self.accuracy, self.counts, self.advice):
-            lay.addWidget(w)
+        self.setAttribute(Qt.WA_StyledBackground)
+        self.setStyleSheet("ResultsPanel { background: rgba(8, 9, 13, 190); }")
+        outer = QVBoxLayout(self)
+        outer.setAlignment(Qt.AlignCenter)
+        self.card = QFrame(objectName="card")
+        self.card.setStyleSheet(f"QFrame#card {{ background: {theme.PANEL}; border: 1px solid {theme.BORDER}; }}")
+        self.card.setFixedWidth(640)
+        outer.addWidget(self.card, 0, Qt.AlignCenter)
+        lay = QVBoxLayout(self.card)
+        lay.setContentsMargins(32, 26, 32, 26)
+        lay.setSpacing(14)
+
+        self.headline = QLabel(objectName="h1")
+        self.badge = QLabel()
+        self.badge.setStyleSheet(f"background: {theme.WARN}; color: #1a1406; border-radius: 10px; padding: 3px 10px; "
+                                 "font-weight: 700;")
+        head = QHBoxLayout()
+        head.addWidget(self.headline)
+        head.addStretch()
+        head.addWidget(self.badge)
+        lay.addLayout(head)
+        self.subtitle = QLabel(objectName="muted")
+        lay.addWidget(self.subtitle)
+
+        mid = QHBoxLayout()
+        mid.setSpacing(24)
+        self.ring = StatRing(132)
+        mid.addWidget(self.ring)
+        right = QVBoxLayout()
+        right.setSpacing(10)
+        self.star_row = QHBoxLayout()
+        self.star_row.setSpacing(6)
+        self.stars = [QLabel() for _ in range(3)]
+        for s in self.stars:
+            self.star_row.addWidget(s)
+        self.star_row.addStretch()
+        right.addLayout(self.star_row)
+        self.grades = GradeBar()
+        right.addWidget(self.grades)
+        self.timing = QLabel(objectName="muted")
+        right.addWidget(self.timing)
+        right.addStretch()
+        mid.addLayout(right, 1)
+        lay.addLayout(mid)
+
+        self.advice = QLabel(wordWrap=True)
+        self.advice.setStyleSheet(f"background: {theme.PANEL_2}; border-radius: 10px; padding: 10px 14px; "
+                                  "line-height: 140%;")
+        lay.addWidget(self.advice)
+
         row = QHBoxLayout()
-        self.next_btn = QPushButton("Next lesson  ▶")
+        row.setSpacing(8)
+        self.next_btn = QPushButton("Next lesson")
         self.next_btn.setObjectName("primary")
         self.next_btn.clicked.connect(self.next_lesson.emit)
-        row.addWidget(self.next_btn)
-        for text, sig in (("Try again", self.retry), ("Try again slower", self.retry_slower), ("Close", self.closed)):
-            b = QPushButton(text)
-            b.clicked.connect(sig.emit)
+        self.retry_btn = QPushButton("Try again")
+        self.retry_btn.clicked.connect(self.retry.emit)
+        self.slower_btn = QPushButton("Try again slower")
+        self.slower_btn.clicked.connect(self.retry_slower.emit)
+        done = QPushButton("Done")
+        done.setObjectName("flat")
+        done.clicked.connect(self.closed.emit)
+        row.addWidget(done)
+        row.addStretch()
+        for b in (self.slower_btn, self.retry_btn, self.next_btn):
             row.addWidget(b)
-        lay.addSpacing(6)
         lay.addLayout(row)
-        self.setFixedWidth(560)
         self.hide()
 
-    def show_summary(self, s, course_status=None, open_hats=False):
-        """open_hats: the lesson has open hi-hats (explain if the kit couldn't tell open from closed)."""
-        """course_status: None for songs, else "passed", "too_slow" or "failed"."""
-        self.stars.setText("★" * s["stars"] + "☆" * (3 - s["stars"]))
-        self.accuracy.setText(f"{s['accuracy'] * 100:.0f}% accuracy")
-        c = s["counts"]
-        self.counts.setText(f"Perfect {c['perfect']}   ·   Good {c['good']}   ·   OK {c['ok']}   ·   "
-                            f"Missed {c['miss']}   ·   Extra {s['extras']}")
+    def show_summary(self, s, course_status=None, open_hats=False, personal_best=False, title="", speed=1.0,
+                     assisted=False):
+        """course_status: None for songs, else "passed", "too_slow", "failed" or "assisted".
+        open_hats: the lesson has open hi-hats (explain if the kit couldn't tell open from closed)."""
+        headline = {"passed": "Lesson passed!", "too_slow": "Nice! Now at full speed",
+                    "failed": "Keep going", "assisted": "Run complete"}.get(course_status)
+        if headline is None:
+            headline = ["Keep practising", "Good start", "Great playing", "Superb!"][s["stars"]]
+        self.headline.setText(headline)
+        self.badge.setText("Personal best!")
+        self.badge.setVisible(personal_best)
+        parts = [title] if title else []
+        parts.append(f"{speed * 100:.0f}% speed")
+        if assisted:
+            parts.append("wait mode (not counted towards your best)")
+        self.subtitle.setText("  ·  ".join(parts))
+        acc = s["accuracy"]
+        self.ring.set_value(acc, theme.GOOD if s["stars"] >= 3 else theme.ACCENT if s["stars"] else theme.BAD,
+                            "accuracy")
+        for i, lbl in enumerate(self.stars):
+            lbl.setPixmap(icon("star", theme.WARN if i < s["stars"] else theme.SURFACE_3, 30))
+        self.grades.set_counts(s["counts"], s["extras"])
+        off = s["mean_offset_ms"]
+        side = "early" if off < 0 else "late"
+        self.timing.setText(f"Timing: on average {abs(off):.0f} ms {side}" if abs(off) >= 3 else
+                            "Timing: right in the pocket")
+        tips = self._tips(s, course_status, open_hats)
+        self.advice.setText("\n".join(tips))
+        self.advice.setVisible(bool(tips))
+        self.next_btn.setVisible(course_status == "passed")
+        self.retry_btn.setObjectName("" if course_status == "passed" else "primary")
+        self.retry_btn.style().unpolish(self.retry_btn)
+        self.retry_btn.style().polish(self.retry_btn)
+        self.slower_btn.setVisible(speed > 0.5 and s["stars"] < 3)
+        self.show()
+        self.raise_()
+
+    @staticmethod
+    def _tips(s, course_status, open_hats):
         tips = []
         off = s["mean_offset_ms"]
         if off < -12:
             tips.append(f"You're rushing a little: on average {abs(off):.0f} ms early.")
         elif off > 12:
             tips.append(f"You're dragging a little: on average {off:.0f} ms late.")
-        else:
-            tips.append("Your timing is centred nicely.")
         if s["weakest_lane"] and s["per_lane"][s["weakest_lane"]] < 0.85 and len(s["per_lane"]) > 1:
-            tips.append(f"Weakest part: {LANE_NAMES[s['weakest_lane']]}. Try turning the other lanes off "
+            tips.append(f"Weakest part: {LANE_NAMES[s['weakest_lane']]}. Try turning the other drums off "
                         "to practise it alone.")
         d = s.get("dynamics")
         if d:
@@ -173,16 +351,14 @@ class ResultsPanel(QFrame):
         if s["extras"] > s["notes"] * 0.1:
             tips.append("Lots of extra hits: check the pad setup under My kit if hits land on the wrong drum.")
         if course_status == "passed":
-            tips.insert(0, "Lesson passed! The next lesson is unlocked.")
+            tips.insert(0, "The next lesson is unlocked.")
         elif course_status == "too_slow":
-            tips.insert(0, "Good! Now play it at 100% speed to unlock the next lesson.")
+            tips.insert(0, "Now play it at 100% speed to unlock the next lesson.")
         elif course_status == "failed":
             tips.insert(0, "Get at least one star at 100% speed to unlock the next lesson.")
-        self.next_btn.setVisible(course_status == "passed")
-        self.advice.setText("\n".join(tips))
-        self.adjustSize()
-        self.show()
-        self.raise_()
+        elif course_status == "assisted":
+            tips.insert(0, "Wait mode helps you learn the notes; turn it off to pass the lesson.")
+        return tips
 
 
 class PracticePage(QWidget):
@@ -197,92 +373,37 @@ class PracticePage(QWidget):
         self.course_lesson = None   # set when playing a course lesson instead of a song
         self.lesson = None
         self.session = None
+        self._played_from = None  # perf_counter when play was pressed (for practice time)
         self.loop_bars = None
         self.lanes = None
+        self.perform = False        # Perform mode: whole song, 100%, no loop or wait
+        self._practice_speed = 0.75
         self.setFocusPolicy(Qt.StrongFocus)
 
         root = QVBoxLayout(self)
-        root.setContentsMargins(18, 14, 18, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(20, 14, 20, 16)
+        root.setSpacing(12)
 
+        # top: back, title, Practice | Perform
         top = QHBoxLayout()
-        top.setSpacing(0)
-        back = self.back_btn = QPushButton("←  Songs")
-        back.setFocusPolicy(Qt.NoFocus)
-        back.setFixedWidth(LEAD_W)
-        back.clicked.connect(self._go_back)
+        top.setSpacing(12)
+        self.back_btn = icon_button("back", "Songs", flat=True)
+        self.back_btn.clicked.connect(self._go_back)
+        top.addWidget(self.back_btn)
+        titles = QVBoxLayout()
+        titles.setSpacing(0)
         self.title = ElidedLabel(objectName="h2")
-        self.info = ElidedLabel(objectName="muted")
-        top.addWidget(back)
-        top.addSpacing(GROUP_GAP + 2 * TOOL_GAP)  # the same gap as Start -> Speed below, so the title sits above it
-        top.addWidget(self.title)
-        top.addSpacing(14)
-        top.addWidget(self.info)
-        top.addStretch(1)
+        self.info = ElidedLabel(objectName="caption")
+        titles.addWidget(self.title)
+        titles.addWidget(self.info)
+        top.addLayout(titles, 1)
+        self.mode = Segmented(["Practice", "Perform"],
+                              tips=["Any speed, loops and wait mode: work on it bit by bit",
+                                    "The whole song at full speed, no help: the run that counts"])
+        self.mode.set_index(0)
+        self.mode.selected.connect(self._set_mode)
+        top.addWidget(self.mode)
         root.addLayout(top)
-
-        bar = FlowRow(spacing=TOOL_GAP)
-        self.play_btn = QPushButton("▶  Start")
-        self.play_btn.setObjectName("primary")
-        self.play_btn.setFixedWidth(LEAD_W)
-        self.play_btn.setFocusPolicy(Qt.NoFocus)
-        self.play_btn.clicked.connect(self.toggle_play)
-        bar.addWidget(self.play_btn)
-        bar.addSpacing(GROUP_GAP)
-        self.speed_group = QButtonGroup(self)
-        self.speed_group.setExclusive(True)
-        speeds = []
-        for i, (name, value) in enumerate(SPEEDS):
-            b = toggle(name, tip=f"{value * 100:.0f}% speed  (key {i + 1})")
-            self.speed_group.addButton(b, i)
-            speeds.append(b)
-        self.speed_more = QPushButton()
-        self.speed_more.setIcon(QIcon(icon("gear", theme.TEXT, 16)))
-        self.speed_more.setToolTip("Any speed: a slider from 30% to 150%")
-        self.speed_more.setCheckable(True)  # shown "on" while the speed is not one of the four buttons
-        self.speed_more.setFocusPolicy(Qt.NoFocus)
-        self.speed_more.clicked.connect(self._speed_popup)
-        speed_box = group("Speed", *speeds, self.speed_more)
-        self.speed_group.idClicked.connect(lambda i: self.set_speed(SPEEDS[i][1]))
-        self.speed = 0.75
-        self.speed_group.button(1).setChecked(True)
-        self.loop_btn = toggle("Loop", tip="Repeat the song, or the bars you drag-select on the strip above the lanes")
-        self.auto_btn = toggle("Auto speed-up", tip="While looping: move up to the next speed (Slow → Medium → Normal) after every pass of 90% or better")
-        self.wait_btn = toggle("Wait for me", tip="The music stops at each note until you hit it. No timing pressure.")
-        self.metro_btn = toggle("Metronome", True)
-        self.guide_btn = toggle("Hear the part", tip="The app plays the drum part too, so you can hear how it goes")
-        self.song_btn = toggle("Song", True, tip="Play the song without its drums, so you are the drummer "
-                                                 "(plays at 100% speed only)")
-        self.dyn_btn = toggle("Rate dynamics", tip="Score how hard you hit: accents (notes with the > sign) louder than normal, "
-                                                   "ghost notes (hollow notes) softer")
-        self.loop_btn.toggled.connect(self._loop_toggled)
-        self.auto_btn.toggled.connect(self._restart_if_running)
-        self.wait_btn.toggled.connect(self._restart_if_running)
-        self.metro_btn.toggled.connect(lambda on: setattr(ctx.audio, "metronome", on))
-        self.guide_btn.toggled.connect(lambda on: setattr(ctx.audio, "guide_all", on))
-        self.song_btn.toggled.connect(lambda on: setattr(ctx.audio, "backing_on", on))
-        self.dyn_btn.toggled.connect(self._restart_if_running)
-        self.timing = QComboBox()
-        self.timing.addItems(["Snapped to 1/16", "Original feel"])
-        self.timing.setFocusPolicy(Qt.NoFocus)
-        self.timing.setToolTip("Clean timing is easier to learn from; original feel keeps the drummer's groove")
-        self.timing.currentIndexChanged.connect(lambda _: self.path and self.load(self.path))
-        self.timing.setVisible(False)
-        self.scoring = group("Scoring", self.dyn_btn, self.timing)
-        # Start | Speed | Sound | Scoring | Practice. Speed and Sound are one widget, so a narrow window
-        # wraps them together; Scoring follows Sound
-        speed_sound = QWidget()
-        pair = QHBoxLayout(speed_sound)
-        pair.setContentsMargins(0, 0, 0, 0)
-        pair.setSpacing(GROUP_GAP + 2 * TOOL_GAP)
-        pair.addWidget(speed_box)
-        pair.addWidget(group("Sound", self.metro_btn, self.guide_btn, self.song_btn))
-        bar.addWidget(speed_sound)
-        bar.addSpacing(GROUP_GAP)
-        bar.addWidget(self.scoring)
-        bar.addSpacing(GROUP_GAP)
-        bar.addWidget(group("Practice", self.loop_btn, self.auto_btn, self.wait_btn))
-        root.addWidget(bar)
 
         self.highway = Highway()
         self.highway.loop_selected.connect(self._loop_selected)
@@ -291,10 +412,82 @@ class PracticePage(QWidget):
         self.highway.lane_muted.connect(self._lane_muted)
         root.addWidget(self.highway, 1)
 
-        hint = QLabel("Drag across bar numbers to loop them (double-click to clear)  ·  Click a drum name to turn it "
-                      "off, its speaker to mute it  ·  Enter = start/stop  ·  1–4 = speed  ·  No kit? Keys: Space kick, "
-                      "J snare, K hi-hat, L ride, U crash, I / O / P toms", objectName="hint", wordWrap=True)
-        root.addWidget(hint)
+        # bottom: the transport bar
+        bar = QFrame(objectName="bar")
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(14, 10, 14, 10)
+        lay.setSpacing(18)
+        self.play_btn = QPushButton(objectName="play")
+        self.play_btn.setStyleSheet(PLAY_CSS)
+        self.play_btn.setFixedSize(52, 52)
+        self.play_btn.setIconSize(QSize(22, 22))
+        self.play_btn.setFocusPolicy(Qt.NoFocus)
+        self.play_btn.setCursor(Qt.PointingHandCursor)
+        self.play_btn.clicked.connect(self.toggle_play)
+        lay.addWidget(self.play_btn)
+
+        self.speed_seg = Segmented([n for n, _ in SPEEDS],
+                                   tips=[f"{v * 100:.0f}% speed  (key {i + 1})" for i, (_, v) in enumerate(SPEEDS)])
+        self.speed_seg.selected.connect(lambda i: self.set_speed(SPEEDS[i][1]))
+        self.speed_more = icon_button("sliders", tip="Any speed: a slider from 30% to 150%", checkable=True)
+        self.speed_more.clicked.connect(self._speed_popup)
+        self.speed_seg.add_widget(self.speed_more)
+        self.speed = 0.75
+        self.speed_seg.set_index(1)
+        lay.addWidget(labelled("Speed", self.speed_seg))
+
+        self.loop_btn = icon_button("loop", "Loop", checkable=True,
+                                    tip="Repeat the song, or the bars you drag-select above the lanes")
+        self.wait_btn = icon_button("wait", "Wait for me", checkable=True,
+                                    tip="The music stops at each note until you hit it. No timing pressure "
+                                        "(these runs don't count towards your best).")
+        lay.addWidget(labelled("Practice", self.loop_btn, self.wait_btn))
+
+        self.metro_btn = icon_button("metronome", "Click", checkable=True, checked=True, tip="Metronome")
+        self.sound_btn = menu_button("speaker", "Sound", "What you hear while you play")
+        sound = self.sound_btn.menu()
+        self.song_btn = setting(sound, "Play along with the song", checked=True,
+                                tip="The song without its drums, so you are the drummer (100% speed only)")
+        self.guide_btn = setting(sound, "Hear the drum part", tip="The app plays the drum part too, so you can hear how it goes")
+        lay.addWidget(labelled("Sound", self.metro_btn, self.sound_btn))
+        lay.addStretch(1)
+
+        self.options_btn = menu_button("sliders", "Options", "Scoring and practice settings")
+        opts = self.options_btn.menu()
+        self.auto_btn = setting(opts, "Auto speed-up while looping",
+                                tip="Move up to the next speed (Slow → Medium → Normal) after every pass of 90% or better")
+        self.dyn_btn = setting(opts, "Rate dynamics (accents and ghost notes)",
+                               tip="Score how hard you hit: accents louder than normal, ghost notes softer")
+        opts.addSeparator()
+        self.timing_group = QActionGroup(self)
+        self.timing_snap = setting(opts, "Timing: snapped to 1/16", checked=True,
+                                   tip="Clean timing is easier to learn from")
+        self.timing_feel = setting(opts, "Timing: original feel", tip="Keeps the drummer's groove")
+        for a in (self.timing_snap, self.timing_feel):
+            self.timing_group.addAction(a)
+        self.timing_group.triggered.connect(lambda _: self.path and self.load(self.path))
+        self.help_btn = icon_button("help", flat=True, tip="Keys and tips")
+        self.help_btn.clicked.connect(self._show_help)
+        lay.addWidget(labelled("More", self.options_btn, self.help_btn))
+        # its full width mustn't set the window's minimum: narrow windows switch it to icons only instead
+        bar.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Fixed)
+        bar.setMinimumHeight(bar.sizeHint().height())
+        root.addWidget(bar)
+        self.speed_seg.setFixedHeight(CONTROL_H)
+        self._labelled = {b: (b.text(), b.toolTip()) for b in (self.loop_btn, self.wait_btn, self.metro_btn,
+                                                                self.sound_btn, self.options_btn)}
+        for b in (*self._labelled, self.help_btn):
+            b.setFixedHeight(CONTROL_H)
+        self._compact = None
+        self._show_playing(False)
+
+        self.loop_btn.toggled.connect(self._loop_toggled)
+        self.auto_btn.toggled.connect(self._restart_if_running)
+        self.wait_btn.toggled.connect(self._restart_if_running)
+        self.metro_btn.toggled.connect(lambda on: setattr(ctx.audio, "metronome", on))
+        self.guide_btn.toggled.connect(lambda on: setattr(ctx.audio, "guide_all", on))
+        self.song_btn.toggled.connect(lambda on: setattr(ctx.audio, "backing_on", on))
+        self.dyn_btn.toggled.connect(self._restart_if_running)
 
         self.results = ResultsPanel(self)
         self.results.retry.connect(self.start)
@@ -313,23 +506,25 @@ class PracticePage(QWidget):
     def load(self, path):
         """Practise a converted song (a drum MIDI file)."""
         self.path, self.course_lesson = path, None
-        self._set_lesson(load_midi(path, quantize=16 if self.timing.currentIndex() == 0 else 0))
-        self.timing.show()
-        self.scoring.show()
-        self.back_btn.setText("←  Songs")
+        self._set_lesson(load_midi(path, quantize=16 if self.timing_snap.isChecked() else 0))
+        for a in (self.timing_snap, self.timing_feel):
+            a.setVisible(True)
+        self.back_btn.setText("Songs")
 
     def load_course_lesson(self, course_lesson):
         self.path, self.course_lesson = None, course_lesson
         self.set_speed(1.0)
         self._set_lesson(course_lesson.to_lesson())
-        self.timing.hide()
-        self.scoring.setVisible(self.lesson.has_dynamics)
-        self.back_btn.setText("←  " + ("Groove Lab" if course_lesson.key.startswith("groove:") else "Course"))
+        for a in (self.timing_snap, self.timing_feel):
+            a.setVisible(False)
+        self.back_btn.setText("Groove Lab" if course_lesson.key.startswith("groove:") else "Course")
         self.highway.status = self._idle_text()
 
     def _idle_text(self):
         tip = self.course_lesson.tip + "\n\n" if self.course_lesson else ""
-        return tip + "Press Start (or Enter) when you're ready"
+        if self.perform:
+            tip += "Perform: the whole song at full speed, no help. This is the run that counts.\n\n"
+        return tip + "Press play (or Enter) when you're ready"
 
     @property
     def key(self):
@@ -347,7 +542,7 @@ class PracticePage(QWidget):
         self.highway.muted = self.ctx.audio.muted
         self.title.setText(self.lesson.title)
         mins, secs = divmod(int(self.lesson.length), 60)
-        self.info.setText(f"{self.lesson.bpm:.0f} BPM  ·  {self.lesson.bars} bars  ·  {mins}:{secs:02d}  ·  "
+        self.info.setText(f"{self.lesson.bpm:.0f} BPM  ·  {mins}:{secs:02d}  ·  {self.lesson.bars} bars  ·  "
                           f"{len(self.lesson.notes)} notes")
         self.highway.set_lesson(self.lesson)
         try:
@@ -379,23 +574,38 @@ class PracticePage(QWidget):
                     auto_speed_up=self.auto_btn.isChecked(),
                     rate_dynamics=self.dyn_btn.isChecked() and self.dyn_btn.isVisible(),
                     speed_steps=[v for _, v in SPEEDS])
+        self._log_time()
         s.start(time.perf_counter() + 0.15)  # small lead so the first count-in click isn't cut off
+        self._played_from = time.perf_counter()
         self.session = s
         self.highway.session = s
         self.highway.status = ""
         self.highway.combo = 0
         self.ctx.audio.session = s
-        self.play_btn.setText("■  Stop")
+        self._show_playing(True)
         self.setFocus()
 
     def stop(self):
+        self._log_time()
         self.ctx.audio.session = None
         self.session = None
         self.highway.session = None
         self.highway.status = self._idle_text() if self.lesson else ""
         self.highway.combo = 0
         self.highway.popups.clear()
-        self.play_btn.setText("▶  Start")
+        self._show_playing(False)
+
+    def _log_time(self):
+        """Add the time since play was pressed to today's practice (for the daily goal on Home)."""
+        if self.session and self._played_from is not None:
+            seconds = time.perf_counter() - self._played_from
+            if seconds >= 2:
+                self.ctx.progress.add_time(seconds)
+        self._played_from = None
+
+    def _show_playing(self, playing):
+        self.play_btn.setIcon(state_icon("stop" if playing else "play", 22, off="#1a0f0b", on="#1a0f0b"))
+        self.play_btn.setToolTip("Stop  (Enter)" if playing else "Play  (Enter)")
 
     def _restart_if_running(self, *_):
         if self.session:
@@ -418,18 +628,33 @@ class PracticePage(QWidget):
                 elif kind == "finished":
                     self.stop()
                     self.highway.status = ""
-                    speed = self.speed
-                    if ev[1]["notes"]:  # nothing to play (e.g. every drum turned off) isn't a result
-                        self.ctx.record_result(self.key, speed, ev[1])
+                    speed, summ, assisted = self.speed, ev[1], s.wait_mode
+                    best = self._is_personal_best(speed, summ) if summ["notes"] and not assisted else False
+                    if summ["notes"]:  # nothing to play (e.g. every drum turned off) isn't a result
+                        self.ctx.record_result(self.key, speed, summ, assisted=assisted)
                     status = None
                     if self.course_lesson:
                         full = speed >= 0.999
-                        status = "passed" if ev[1]["stars"] and full else "too_slow" if ev[1]["stars"] else "failed"
+                        status = ("assisted" if assisted else "passed" if summ["stars"] and full
+                                  else "too_slow" if summ["stars"] else "failed")
                         self.course_passed.emit()
-                    self.results.show_summary(ev[1], status, "hihat" in s.lanes and self.lesson.has_open_hats)
+                    self.results.show_summary(summ, status, "hihat" in s.lanes and self.lesson.has_open_hats,
+                                              personal_best=best, title=self.lesson.title, speed=speed,
+                                              assisted=assisted)
+                    if self.perform:
+                        self.results.slower_btn.hide()
                     self._place_results()
         if self.isVisible():
             self.highway.update()
+
+    def _is_personal_best(self, speed, summ):
+        """Better than every earlier (counted) run of this song or lesson: full speed first, then stars, accuracy."""
+        if not self.key or not summ["stars"]:
+            return False
+        prev = self.ctx.progress.best(self.key)
+        if prev is None:
+            return True
+        return (speed >= 0.999, summ["stars"], summ["accuracy"]) > (prev[2] >= 0.999, prev[0], prev[1])
 
     # ---------- hits ----------
 
@@ -474,7 +699,7 @@ class PracticePage(QWidget):
             self.toggle_play()
         elif e.key() == Qt.Key_Escape:
             self.stop()
-        elif e.key() in SPEED_KEYS:
+        elif e.key() in SPEED_KEYS and not self.perform:
             self.set_speed(SPEEDS[SPEED_KEYS[e.key()]][1])
         elif e.key() in KEY_LANES:
             lane = KEY_LANES[e.key()]
@@ -487,7 +712,7 @@ class PracticePage(QWidget):
     def _update_song_hint(self):
         if self.lesson and self.lesson.backing is not None:
             full = abs(self.speed - 1.0) < 1e-3
-            self.song_btn.setText("Song" if full else "Song (at 100%)")
+            self.song_btn.setText("Play along with the song" if full else "Play along with the song (100% speed only)")
             self.song_btn.setEnabled(full)
 
     def set_speed(self, value):
@@ -499,23 +724,43 @@ class PracticePage(QWidget):
         """Light up the button for this speed; any other speed (the slider, or auto speed-up between
         presets) lights the gear button, which then shows the percentage."""
         self.speed = value
-        self.speed_group.setExclusive(False)
-        preset = False
-        for i, (_, v) in enumerate(SPEEDS):
-            on = abs(v - value) < 1e-3
-            self.speed_group.button(i).setChecked(on)
-            preset |= on
-        self.speed_group.setExclusive(True)
-        self.speed_more.setChecked(not preset)
-        self.speed_more.setText("" if preset else f" {value * 100:.0f}%")
+        i = next((i for i, (_, v) in enumerate(SPEEDS) if abs(v - value) < 1e-3), -1)
+        self.speed_seg.set_index(i)
+        self.speed_more.setChecked(i < 0)
+        self.speed_more.setText("" if i >= 0 else f" {value * 100:.0f}%")
         self._update_song_hint()
 
     def _speed_popup(self):
         self.speed_more.setChecked(not any(abs(v - self.speed) < 1e-3 for _, v in SPEEDS))  # a click toggles it
         popup = SpeedPopup(self.speed, self)
         popup.changed.connect(self.set_speed)
-        popup.move(self.speed_more.mapToGlobal(self.speed_more.rect().bottomLeft()) + QPoint(0, 6))
-        popup.show()
+        popup.show_under(self.speed_more, above=True)
+
+    def _show_help(self):
+        HelpPopup(self).show_under(self.help_btn, above=True)
+
+    def _set_mode(self, i):
+        """Practice (0) or Perform (1): Perform plays the whole song at 100% with loop, wait mode and speed
+        changes locked, and puts back your practice speed when you leave it."""
+        perform = i == 1
+        if perform == self.perform:
+            return
+        self.stop()
+        self.results.hide()
+        self.perform = perform
+        if perform:
+            self._practice_speed = self.speed
+            self.loop_btn.setChecked(False)   # also clears a loop selection
+            self.wait_btn.setChecked(False)
+            self.auto_btn.setChecked(False)
+            self.set_speed(1.0)
+        else:
+            self.set_speed(self._practice_speed)
+        for w in (self.speed_seg, self.loop_btn, self.wait_btn):
+            w.setEnabled(not perform)
+        self.auto_btn.setEnabled(not perform)
+        self.highway.status = self._idle_text() if self.lesson else ""
+        self.highway.update()
 
     def _slower(self):
         return max([v for _, v in SPEEDS if v < self.speed - 1e-3], default=SPEEDS[0][1])
@@ -525,6 +770,8 @@ class PracticePage(QWidget):
         return next((f"{n} ({v * 100:.0f}%)" for n, v in SPEEDS if abs(v - value) < 1e-3), f"{value * 100:.0f}%")
 
     def _loop_selected(self, a, b):
+        if self.perform:
+            return
         self.loop_bars = (a, b)
         self.highway.preview_from = a * self.lesson.bar
         self.loop_btn.setChecked(True)   # restarts if running
@@ -564,11 +811,16 @@ class PracticePage(QWidget):
         self.back.emit()
 
     def _place_results(self):
-        r = self.results
-        r.move((self.width() - r.width()) // 2, (self.height() - r.height()) // 2)
+        self.results.setGeometry(self.rect())
 
     def resizeEvent(self, e):
         super().resizeEvent(e)
+        compact = self.width() < COMPACT_W
+        if compact != self._compact:
+            self._compact = compact
+            for b, (text, tip) in self._labelled.items():
+                b.setText("" if compact else text)
+                b.setToolTip(f"{text.replace('  ▾', '')}: {tip}" if compact else tip)
         self._place_results()
 
     def hideEvent(self, e):

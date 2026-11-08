@@ -6,6 +6,7 @@ from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from ..lanes import NOTE_TO_LANE, OPEN_HAT_NOTES
+from .difficulty import difficulty, difficulty_score, rate
 
 
 ACCENT_MIN = 116      # velocity from which a note can be an accent...
@@ -79,16 +80,18 @@ class Lesson:
     def has_open_hats(self):
         return any(n.open for n in self.notes)
 
+    def rating(self):
+        """Difficulty level, E/M/H grade and what makes it hard (see engine/difficulty.py)."""
+        return rate(self.notes, self.beat, self.bar)
+
+    def difficulty_score(self):
+        """Unrounded difficulty, for ranking (see engine/difficulty.py)."""
+        return difficulty_score(self.notes, self.beat, self.bar)
+
     def difficulty(self):
-        """Rough 1-10 score from note density and how many limbs play at once."""
-        if not self.notes:
-            return 1
-        per_sec = len(self.notes) / self.length
-        onsets = {}
-        for n in self.notes:
-            onsets.setdefault(round(n.t, 2), set()).add(n.lane)
-        poly = sum(len(v) for v in onsets.values()) / len(onsets)
-        return max(1, min(10, round(per_sec * 0.45 + (poly - 1) * 2.5)))
+        """1-10, from the hardest bars: hand and kick speed, limbs at once, fills, syncopation, ghost
+        notes and open hi-hats (see engine/difficulty.py)."""
+        return difficulty(self.notes, self.beat, self.bar)
 
 
 def merge_hits(hits):

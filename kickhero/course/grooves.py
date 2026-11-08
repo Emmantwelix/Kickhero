@@ -115,11 +115,9 @@ class GrooveLesson:
         return f"{self.title}: {self.category.lower()} in {self.meter}" + (f"  ·  {styles}" if styles else "")
 
     def difficulty(self):
-        """How hard it is to play: busy-ness and limbs at once (Lesson.difficulty), odd time, notes per
-        second and the tempo itself (fast grooves are harder even when sparse)."""
-        les = self.to_lesson()
-        return (les.difficulty() + (1.5 if self.odd_time else 0) + len(les.notes) / les.length * 0.1
-                + max(0.0, self.bpm - 80) / 40)
+        """How hard it is to play: the lesson's difficulty (hand and kick speed, limbs at once, fills,
+        syncopation...), plus a step for odd time signatures."""
+        return self.to_lesson().difficulty_score() + (1.5 if self.odd_time else 0)
 
     def to_lesson(self):
         """The groove, repeated until the lesson is MIN_BARS bars long (twice at least)."""

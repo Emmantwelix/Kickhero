@@ -7,15 +7,15 @@ import sys
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QObject, Qt, Signal
+from PySide6.QtCore import QObject, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import (QApplication, QButtonGroup, QHBoxLayout, QLabel, QMainWindow, QPushButton,
+from PySide6.QtWidgets import (QApplication, QButtonGroup, QFrame, QHBoxLayout, QLabel, QMainWindow, QPushButton,
                                QVBoxLayout, QWidget)
 
 from .engine.audio import AudioEngine
-from .kit.mapping import hat_open, load_kit, save_kit
+from .kit.mapping import load_kit, save_kit
 from .kit.midi_input import MidiInput
-from .lanes import OPEN_HAT, OPEN_HAT_NOTES
+from .lanes import OPEN_HAT
 from .progress import Progress
 from .settings import Settings
 from .ui import theme
@@ -25,6 +25,7 @@ from .ui.editor import EditorPage
 from .ui.fitting import PageStack
 from .ui.grooves import GroovesPage
 from .ui.kit_setup import KitPage
+from .ui.home import HomePage
 from .ui.library import LibraryPage
 from .ui.practice import PracticePage
 
@@ -72,8 +73,8 @@ class AppContext(QObject):
         if lane:
             opened = None
             if lane == "hihat":
-                self.kit_opens |= note in OPEN_HAT_NOTES
-                opened = hat_open(note, self.pedal, self.kit_opens)
+                self.kit_opens |= self.kit.is_open_hat(note)
+                opened = self.kit.hat_open(note, self.pedal, self.kit_opens)
             if self.settings["pad_sounds"]:
                 self.audio.play_pad(OPEN_HAT if opened else lane, velocity)
             self.lane_hit.emit(lane, velocity, perf - self.settings["latency_ms"] / 1000, opened)
@@ -93,9 +94,18 @@ class AppContext(QObject):
         self.audio.volume[key] = value
         self.settings[f"volume_{key}"] = value
 
-    def record_result(self, lesson_path, speed, summary):
+    def record_result(self, lesson_path, speed, summary, assisted=False):
         if lesson_path:
-            self.progress.record(lesson_path, speed, summary)
+            self.progress.record(lesson_path, speed, summary, assisted=assisted)
+
+
+def nav_icon(name):
+    """A sidebar icon: muted, and full white on the page you're on."""
+    ic = QIcon()
+    ic.addPixmap(icon(name, theme.MUTED, 18), QIcon.Normal, QIcon.Off)
+    ic.addPixmap(icon(name, theme.TEXT, 18), QIcon.Normal, QIcon.On)
+    ic.addPixmap(icon(name, theme.TEXT, 18), QIcon.Active, QIcon.Off)
+    return ic
 
 
 class MainWindow(QMainWindow):
@@ -112,11 +122,18 @@ class MainWindow(QMainWindow):
         h.setSpacing(0)
 
         side = QWidget(objectName="sidebar")
-        side.setFixedWidth(190)
+        side.setFixedWidth(208)
         sl = QVBoxLayout(side)
-        sl.setContentsMargins(0, 0, 0, 12)
+        sl.setContentsMargins(0, 20, 0, 14)
         sl.setSpacing(2)
-        sl.addWidget(QLabel("Kickhero", objectName="appname"))
+        brand = QHBoxLayout()
+        brand.setContentsMargins(22, 0, 16, 18)
+        brand.setSpacing(10)
+        logo = QLabel()
+        logo.setPixmap(QIcon(str(ICON)).pixmap(26, 26))
+        brand.addWidget(logo)
+        brand.addWidget(QLabel(APP_TITLE, objectName="appname"), 1)
+        sl.addLayout(brand)
         self.stack = PageStack()
         self.library = LibraryPage(ctx)
         self.course = CoursePage(ctx)
@@ -124,20 +141,32 @@ class MainWindow(QMainWindow):
         self.practice = PracticePage(ctx)
         self.kit = KitPage(ctx)
         self.editor = EditorPage(ctx)
-        for page in (self.library, self.course, self.grooves, self.practice, self.kit, self.editor):
+        self.home = HomePage(ctx, self.course, self.grooves)
+        for page in (self.home, self.library, self.course, self.grooves, self.practice, self.kit, self.editor):
             self.stack.addWidget(page)
 
         self.nav = QButtonGroup(self)
         self.nav_for = {}
-        for text, page in (("Songs", self.library), ("Course", self.course), ("Groove Lab", self.grooves), ("My kit", self.kit)):
+        for text, name, page in (("Home", "home", self.home), ("Songs", "songs", self.library),
+                                 ("Course", "course", self.course),
+                                 ("Groove Lab", "groove", self.grooves), ("My kit", "kit", self.kit)):
             b = QPushButton(text, objectName="nav", checkable=True)
+            b.setIcon(nav_icon(name))
+            b.setIconSize(QSize(18, 18))
+            b.setCursor(Qt.PointingHandCursor)
             b.setFocusPolicy(Qt.NoFocus)
             b.clicked.connect(lambda _=False, p=page: self.go_to(p))
             self.nav.addButton(b)
             self.nav_for[page] = b
             sl.addWidget(b)
-        self.nav_for[self.library].setChecked(True)
+        self.nav_for[self.home].setChecked(True)
+        self.return_to = self.home  # the page the play screen goes back to
         sl.addStretch()
+        rule = QFrame()
+        rule.setFixedHeight(1)
+        rule.setStyleSheet(f"background: {theme.BORDER}; margin: 0 18px;")
+        sl.addWidget(rule)
+        sl.addSpacing(8)
         self.streak = QPushButton(objectName="status")
         self.streak.setEnabled(False)  # just a label (a button only to show the icon beside the text)
         sl.addWidget(self.streak)
@@ -148,7 +177,14 @@ class MainWindow(QMainWindow):
         sl.addWidget(self.device)
         h.addWidget(side)
         h.addWidget(self.stack, 1)
+        self.side = side
+        # the play screen takes the whole window, like a game: the sidebar comes back when you leave it
+        self.stack.currentChanged.connect(lambda _: side.setVisible(self.stack.currentWidget() is not self.practice))
 
+        self.home.practise.connect(self.open_lesson)
+        self.home.play_lesson.connect(self.open_course_lesson)
+        self.home.show_page.connect(lambda name: self.go_to({"songs": self.library, "course": self.course,
+                                                             "grooves": self.grooves}[name]))
         self.library.practise.connect(self.open_lesson)
         self.library.edit.connect(self.open_editor)
         self.editor.back.connect(lambda: self.go_to(self.library))
@@ -187,14 +223,20 @@ class MainWindow(QMainWindow):
 
     def open_lesson(self, path):
         self.practice.load(path)
-        self.stack.setCurrentWidget(self.practice)
-        self.nav_for[self.library].setChecked(True)  # the sidebar shows where you came from
-        self.practice.setFocus()
+        self._show_practice(self.library)
 
     def open_course_lesson(self, lesson):
         self.practice.load_course_lesson(lesson)
+        self._show_practice(self._lesson_page(lesson))
+
+    def _show_practice(self, page):
+        """Open the play screen; back returns to Home if it was opened from there, otherwise to `page`."""
+        if self.stack.currentWidget() is not self.practice:
+            self.return_to = self.home if self.stack.currentWidget() is self.home else page
+        if self.return_to is self.home:
+            self.practice.back_btn.setText("Home")
         self.stack.setCurrentWidget(self.practice)
-        self.nav_for[self._lesson_page(lesson)].setChecked(True)
+        self.nav_for[self.return_to].setChecked(True)
         self.practice.setFocus()
 
     def _next_course_lesson(self):
@@ -211,7 +253,7 @@ class MainWindow(QMainWindow):
 
     def _back_from_practice(self):
         current = self.practice.course_lesson
-        page = self._lesson_page(current) if current else self.library
+        page = self.return_to if self.return_to is self.home else self._lesson_page(current) if current             else self.library
         self.stack.setCurrentWidget(page)
         self.nav_for[page].setChecked(True)
         self._show_streak()

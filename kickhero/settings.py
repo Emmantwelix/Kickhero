@@ -42,6 +42,7 @@ DEFAULTS = {
     "volume_pads": 0.8,
     "volume_backing": 0.8,
     "course_unlock_all": False,
+    "daily_goal_min": 10,       # minutes of playing a day (Home)
     "groove_folder": "",        # a groove library's Resources folder; empty = look in the usual install places
     "sound_kit": "classic",     # built-in kit name, or "custom"
     "custom_sounds": {},        # lane -> sample file on this computer (for sound_kit "custom")

@@ -29,6 +29,11 @@ MATCH_S = 0.05  # a note "matches" the recording if a drum hit is heard this clo
 # either way. Hit detection misses some hits in a busy drum stem, and steady drumming matches fairly well
 # even a beat off, so the share alone says little; a fit that's right beats the moved part clearly.
 CLEAR_LEAD = 0.10
+# Steady grooves (kick and snare taking turns on every beat) match as well a beat off, so the share can't
+# tell. What the hits sound like can: hits under the kick notes should be bassier than those under the
+# snare notes (or, in a part without snare, the other drums), and a beat off the two swap. SOUND_LEAD is
+# how much more so (in log energy ratio) the part as placed must be than moved a beat, to count as sure.
+SOUND_LEAD = 0.5
 
 
 class MidiImportError(ValueError):
@@ -215,14 +220,69 @@ def match_rate(t, audio_times):
 
 
 def drum_hits(drums_wav):
-    """Times and loudness of the hits heard in a drum stem."""
+    """Times, loudness and bassiness (see hit_tilt) of the hits heard in a drum stem, and its length."""
     import librosa
 
     from .drums2midi import detect_hits
 
     y, sr = librosa.load(str(drums_wav), sr=22050, mono=True)
     times, peak_db, _, _ = detect_hits(y, sr, sensitivity=0.03, gate_db=-40.0, min_gap_ms=30.0)
-    return np.asarray(times), 10 ** (np.asarray(peak_db) / 20), len(y) / sr
+    times = np.asarray(times)
+    return times, 10 ** (np.asarray(peak_db) / 20), len(y) / sr, hit_tilt(y, sr, times)
+
+
+def hit_tilt(y, sr, times):
+    """How bass-heavy each hit sounds: log of its energy below 150 Hz over its energy at 1.5-8 kHz, in its
+    first 50 ms. High for a kick, low for a snare."""
+    n = int(0.05 * sr)
+    f = np.fft.rfftfreq(2048, 1 / sr)
+    low, high = f < 150, (f > 1500) & (f < 8000)
+    out = []
+    for t in times:
+        seg = y[int(t * sr):int(t * sr) + n]
+        power = np.abs(np.fft.rfft(seg * np.hanning(len(seg)), 2048)) ** 2 if len(seg) > 1 else np.zeros(len(f))
+        out.append(np.log((power[low].sum() + 1e-9) / (power[high].sum() + 1e-9)))
+    return np.asarray(out)
+
+
+def sound_check(t, lanes, hit_times, tilt, beat):
+    """How much bassier the hits under the kick notes sound than those under the snare notes (or, with
+    fewer than 8 snares, the other drums): (the part as placed, the higher of it moved a beat either way).
+    None when there aren't enough notes of both kinds to tell."""
+    lanes = np.asarray(lanes)
+    kick = lanes == "kick"
+    other = lanes == "snare" if (lanes == "snare").sum() >= 8 else ~kick
+    if kick.sum() < 8 or other.sum() < 8 or len(hit_times) < 2:
+        return None
+    order = np.argsort(hit_times)
+    hits, tilt = np.asarray(hit_times)[order], np.asarray(tilt)[order]
+
+    def heard(times):  # median tilt of the hits within MATCH_S of the times
+        i = np.clip(np.searchsorted(hits, times), 1, len(hits) - 1)
+        j = np.where(np.abs(hits[i] - times) < np.abs(hits[i - 1] - times), i, i - 1)
+        ok = np.abs(hits[j] - times) < MATCH_S
+        return float(np.median(tilt[j[ok]])) if ok.sum() >= 4 else None
+
+    def score(d):
+        k, o = heard(t[kick] + d), heard(t[other] + d)
+        return None if k is None or o is None else k - o
+
+    placed, off = score(0.0), [s for s in (score(-beat), score(beat)) if s is not None]
+    return None if placed is None or not off else (placed, max(off))
+
+
+def fit_verdict(rate, off, sound=None):
+    """"good", "unclear" or "beat_off": the share of kick and snare notes matching against the part moved a
+    beat, settled by the sound check (see SOUND_LEAD) when the shares are close."""
+    if rate - off >= CLEAR_LEAD:
+        return "good"
+    if sound:
+        placed, moved = sound
+        if placed - moved >= SOUND_LEAD:
+            return "good"
+        if moved - placed >= SOUND_LEAD:
+            return "beat_off"
+    return "unclear"
 
 
 def align(notes, info, audio_times, audio_weights, length):
@@ -266,15 +326,18 @@ def intro_shift(origin, earliest, bar):
 
 def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None):
     """Write the MIDI's drum part lined up with a recording whose drum stem is drums_wav (and drumless
-    mix `backing`, a file name in `folder`). Returns (MIDI path, (match rate, match rate a beat off))."""
+    mix `backing`, a file name in `folder`). Returns (MIDI path, (match rate, match rate a beat off,
+    sound check or None))."""
     notes, info = read_drums(midi_path)
-    times, weights, length = drum_hits(drums_wav)
+    times, weights, length, tilt = drum_hits(drums_wav)
     if len(times) < 8:
         raise MidiImportError("Hardly any drums can be heard in this recording, so the MIDI can't be lined up.")
-    t, bpm, origin, _, fit = align(notes, info, times, weights, length)
+    t, bpm, origin, _, (rate, off) = align(notes, info, times, weights, length)
+    sound = sound_check(t, [NOTE_TO_LANE[n[2]] for n in notes], times, tilt, 60.0 / bpm)
     shift = intro_shift(origin, min(0.0, float(t.min())), 240.0 / bpm)
     out = [(float(ti) + shift, pitch, vel) for ti, (_, _, pitch, vel) in zip(t, notes)]
     path = write_song(folder, name, out, bpm, shift=shift, backing=backing, source=source,
-                      midi_source=str(Path(midi_path).resolve()), imported="midi", match=round(fit[0], 3),
-                      match_beat_off=round(fit[1], 3))
-    return path, fit
+                      midi_source=str(Path(midi_path).resolve()), imported="midi", match=round(rate, 3),
+                      match_beat_off=round(off, 3), fit=fit_verdict(rate, off, sound),
+                      **({"sound": round(sound[0], 2), "sound_beat_off": round(sound[1], 2)} if sound else {}))
+    return path, (rate, off, sound)
