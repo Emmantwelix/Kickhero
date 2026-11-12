@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (QComboBox, QDialog, QDoubleSpinBox, QFrame, QHBox
 
 from ..engine.editing import VELOCITY, load_part
 from ..engine.lesson import Note, classify_dynamics
+from ..engine.meter import COMMON_METERS, pulse
 from ..engine.session import Session
 from ..lanes import LANE_COLORS, LANE_NAMES, LANES
 from . import theme
@@ -99,7 +100,7 @@ class EditorGrid(QWidget):
         return max(part.bars, song) + 2
 
     def _update_scrollbar(self):
-        width = self.total_bars() * 4 * self.ppb
+        width = self.total_bars() * self.part.beats_per_bar * self.ppb
         view = max(1, self.width() - LABEL_W)
         self.scrollbar.setRange(0, max(0, int(width - view)))
         self.scrollbar.setPageStep(int(view))
@@ -169,7 +170,7 @@ class EditorGrid(QWidget):
         return min(hits, key=lambda n: abs(self.x_of(n.t) - pos.x())) if hits else None
 
     def step(self):
-        return self.part.bar / self.grid if self.grid else self.part.beat / 8
+        return 4 * self.part.beat / self.grid if self.grid else self.part.beat / 8
 
     # ---------- painting ----------
 
@@ -253,13 +254,14 @@ class EditorGrid(QWidget):
         part = self.part
         t0, t1 = self.time_at(LABEL_W), self.time_at(self.width())
         end = self.total_bars() * part.bar
-        sub = self.step() if self.grid and part.bar / self.grid * self.ppb / part.beat >= 7 else part.beat
+        click = part.beat * pulse(part.meter)[0]  # stronger lines on the counted beats (dotted quarters in 6/8)
+        sub = self.step() if self.grid and self.step() * self.ppb / part.beat >= 7 else min(part.beat, click)
         k = max(0, math.floor(t0 / sub))
         while k * sub <= min(t1, end):
             t = k * sub
-            beats = t / part.beat
-            on_beat = abs(beats - round(beats)) < 1e-6
-            downbeat = on_beat and round(beats) % 4 == 0
+            clicks, bars = t / click, t / part.bar
+            on_beat = abs(clicks - round(clicks)) < 1e-6
+            downbeat = abs(bars - round(bars)) < 1e-6
             p.setPen(QPen(qc("#ffffff", 0.22 if downbeat else 0.08 if on_beat else 0.035), 2 if downbeat else 1))
             p.drawLine(QPointF(self.x_of(t), RULER_H - (8 if downbeat else 0)), QPointF(self.x_of(t), bottom))
             k += 1
@@ -463,6 +465,17 @@ class TempoDialog(QDialog):
             row.addWidget(b)
         row.addStretch()
         lay.addLayout(row)
+        lay.addWidget(QLabel("Time signature", objectName="h2"))
+        row = QHBoxLayout()
+        self.meter = QComboBox(editable=True)
+        self.meter.addItems(COMMON_METERS if part.meter in COMMON_METERS else [part.meter] + COMMON_METERS)
+        self.meter.setCurrentText(part.meter)
+        self.meter.setFixedWidth(100)
+        self.meter.setToolTip("Beats per bar / note value, e.g. 3/4 for a waltz, 6/8 or 12/8 for a swaying feel. "
+                              "Type any other, like 11/8")
+        row.addWidget(self.meter)
+        row.addStretch()
+        lay.addLayout(row)
         lay.addWidget(QLabel("The notes stay where they are in the song; only the bar lines change.",
                              objectName="muted", wordWrap=True))
         lay.addWidget(QLabel("Move everything", objectName="h2"))
@@ -558,7 +571,8 @@ class EditorPage(QWidget):
         self.undo_btn.clicked.connect(self.undo)
         self.redo_btn = icon_button("redo", tip="Redo (Ctrl+Y)")
         self.redo_btn.clicked.connect(self.redo)
-        tempo = icon_button("metronome", "Tempo && bar 1...", tip="Fix the tempo, or move where bar 1 starts")
+        tempo = icon_button("metronome", "Tempo && bar 1...",
+                            tip="Fix the tempo or time signature, or move where bar 1 starts")
         tempo.clicked.connect(self.edit_tempo)
         for b in (self.undo_btn, self.redo_btn, tempo):
             bar.addWidget(b)
@@ -622,7 +636,7 @@ class EditorPage(QWidget):
         if part is None:
             return
         self.grid.refresh()
-        self.info.setText(f"{part.bpm:.1f} BPM  ·  {part.bars} bars  ·  {len(part.notes)} notes"
+        self.info.setText(f"{part.bpm:.1f} BPM  ·  {part.meter}  ·  {part.bars} bars  ·  {len(part.notes)} notes"
                           + ("  ·  edited, not saved" if part.dirty else ""))
         self.save_btn.setEnabled(part.dirty)
         self.undo_btn.setEnabled(part.can_undo())
@@ -767,6 +781,7 @@ class EditorPage(QWidget):
             if dlg.move_by:
                 self.part.shift_all(dlg.move_by)
             self.part.set_bpm(dlg.bpm.value())
+            self.part.set_meter(dlg.meter.currentText())
             self.grid.selected = set()
             self._changed()
 
@@ -820,7 +835,8 @@ class EditorPage(QWidget):
         if len(sel) == 1:
             n = sel[0]
             beats = n.t / part.beat
-            bar, beat = int(beats // 4) + 1, beats % 4 + 1
+            bpb = part.beats_per_bar
+            bar, beat = int(beats // bpb + 1e-9) + 1, beats % bpb + 1
             kind = self.grid._dyn.get(n, "normal")
             hat = (", open" if n.open else ", closed") if n.lane == "hihat" else ""
             text = f"{LANE_NAMES[n.lane]}{hat}  ·  bar {bar}, beat {beat:.2f}  ·  velocity {n.velocity} ({kind})"

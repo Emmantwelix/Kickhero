@@ -32,6 +32,8 @@ from pathlib import Path
 
 import numpy as np
 
+from ..engine.meter import meter_beats
+
 
 DRUMS_MODEL = "htdemucs_ft.yaml"
 KIT_MODEL = "MDX23C-DrumSep-aufr33-jarredou.ckpt"
@@ -135,10 +137,11 @@ def separate_drums_only(audio_path, out_dir, model_dir):
         demucs_separator.get_demucs_model = load
 
 
-def detect_bpm(wav_path):
+def detect_bpm(wav_path, beats_per_bar=4):
     """Tempo from the bar length: drum patterns repeat every bar, and that repeat is a much
-    stronger, less ambiguous peak than the beat itself. Assumes 4/4 at 75-160 BPM (a bar of
-    1.5-3.2 s); falls back to librosa's beat tracker if no bar-length repeat is found."""
+    stronger, less ambiguous peak than the beat itself. Looks for 75-160 BPM (in 4/4 a bar of
+    1.5-3.2 s); falls back to librosa's beat tracker if no bar-length repeat is found.
+    beats_per_bar is in quarter notes (3 for 3/4 and 6/8)."""
     import librosa
 
     y, sr = librosa.load(str(wav_path), sr=22050, mono=True, duration=120)
@@ -147,7 +150,7 @@ def detect_bpm(wav_path):
     fps = sr / hop
     ac = librosa.autocorrelate(env - env.mean())
     ac /= ac[0]
-    lo, hi = int(1.5 * fps), min(int(3.2 * fps), len(ac) - 2)
+    lo, hi = int(beats_per_bar * 60 / 160 * fps), min(int(beats_per_bar * 60 / 75 * fps), len(ac) - 2)
     peaks = [i for i in range(lo, hi + 1) if ac[i] >= ac[i - 1] and ac[i] >= ac[i + 1] and ac[i] > 0.2]
     if not peaks:
         tempo, _ = librosa.beat.beat_track(onset_envelope=env, sr=sr, hop_length=hop)
@@ -155,7 +158,7 @@ def detect_bpm(wav_path):
     i = max(peaks, key=lambda k: ac[k])
     a, b, c = ac[i - 1], ac[i], ac[i + 1]
     shift = 0.5 * (a - c) / (a - 2 * b + c) if a - 2 * b + c else 0.0  # parabolic sub-frame peak
-    return 4 * 60 / ((i + shift) / fps)
+    return beats_per_bar * 60 / ((i + shift) / fps)
 
 
 def process_song(song, args):
@@ -195,7 +198,7 @@ def process_song(song, args):
         from .midi_import import fit_verdict, import_aligned
 
         print("[2/2] Lining up the MIDI file with the song...")
-        _, (rate, off, sound) = import_aligned(args.midi, drums_wav, song_dir, name,
+        _, (rate, off, sound) = import_aligned(args.midi, drums_wav, song_dir, name, meter=args.meter,
                                         backing=backing.name if has_backing else None,
                                         source=str(Path(song).resolve()))
         print(f"{rate:.0%} of the MIDI's kick and snare notes line up with drums heard in the song "
@@ -217,11 +220,12 @@ def process_song(song, args):
         bpm = args.bpm
         print(f"[3/4] Using tempo {bpm:g} BPM")
     else:
-        bpm = detect_bpm(drums_wav)
+        bpm = detect_bpm(drums_wav, meter_beats(args.meter or "4/4"))
         print(f"[3/4] Estimated tempo ~ {bpm:.1f} BPM (if the final tempo is wrong, set it yourself)")
 
     print("[4/4] Writing MIDI...")
-    d2m_args = [str(kit_dir), "-o", str(midi_path), "--bpm", f"{bpm:.3f}", "--ref", str(drums_wav),
+    d2m_args = [str(kit_dir), "-o", str(midi_path), "--bpm", f"{bpm:.3f}", "--meter", args.meter or "4/4",
+                "--ref", str(drums_wav),
                 "--ref-gate", str(args.ref_gate), "--bleed-db", str(args.bleed_db),
                 "--sensitivity", str(args.sensitivity), "--gate", str(args.gate),
                 "--min-gap", str(args.min_gap), "--hihat-open-ms", str(args.hihat_open_ms)]
@@ -238,7 +242,7 @@ def process_song(song, args):
     result = drums2midi.main(d2m_args)
     write_metadata(
         midi_path.with_suffix(".json"), title=name, source=str(Path(song).resolve()),
-        bpm=result["bpm"], shift=result["shift"], backing=backing.name if has_backing else None,
+        bpm=result["bpm"], shift=result["shift"], meter=args.meter or "4/4", backing=backing.name if has_backing else None,
         settings={k: v for k, v in vars(args).items() if k not in ("inputs", "output", "model_dir", "watch")},
     )
 
@@ -288,11 +292,23 @@ def run_all(args, quiet=False):
     return songs
 
 
+def parse_meter_arg(text):
+    from ..engine.meter import parse_meter
+
+    meter = parse_meter(text, None)
+    if meter is None:
+        raise argparse.ArgumentTypeError(f"not a time signature: {text!r} (try 3/4 or 6/8)")
+    return meter
+
+
 def build_parser():
     p = argparse.ArgumentParser(description="Song(s) in, drum MIDI out. Fully automatic.")
     p.add_argument("inputs", nargs="+", help="Song files and/or folders of songs")
     p.add_argument("-o", "--output", default="drum_midi", help="Output folder (default: drum_midi)")
     p.add_argument("--bpm", type=float, help="Tempo for the MIDI file. Default: auto-detect")
+    p.add_argument("--meter", type=parse_meter_arg,
+                   help="Time signature, e.g. 3/4, 6/8. It can't be detected: default 4/4 "
+                        "(with --midi, the MIDI file's own)")
     p.add_argument("--quantize", type=int, default=0, metavar="GRID", help="Snap to grid, e.g. 16. Default: off")
     p.add_argument("--keep-stems", action="store_true", help="Keep drums.wav and the kit stems")
     p.add_argument("--force", action="store_true", help="Redo songs that already have a MIDI file")

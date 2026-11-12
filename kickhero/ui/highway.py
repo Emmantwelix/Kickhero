@@ -297,17 +297,19 @@ class Highway(QWidget):
         top, bottom = self._lane_rect(0).top(), self._lane_rect(len(self.lanes) - 1).bottom()
         start = self.preview_from
         p.setFont(QFont("Segoe UI", 8))
-        beat = math.ceil(start / les.beat - 1e-6)
-        while (beat * les.beat - start) / les.beat <= BEATS_AHEAD + 1:
-            x = self._hit_x() + (beat * les.beat - start) / les.beat * ppb
-            downbeat = beat % les.beats_per_bar == 0
+        click = les.beat * les.click_beats  # grid lines on the metronome clicks (dotted quarters in 6/8)
+        k = math.ceil(start / click - 1e-6)
+        while (k * click - start) / les.beat <= BEATS_AHEAD + 1:
+            t = k * click
+            x = self._hit_x() + (t - start) / les.beat * ppb
+            downbeat = k % les.clicks_per_bar == 0
             p.setPen(QPen(qc("#ffffff", 0.16 if downbeat else 0.05), 2 if downbeat else 1))
             p.drawLine(QPointF(x, top), QPointF(x, bottom))
-            bar_no = round(beat / les.beats_per_bar) + 1
+            bar_no = round(t / les.bar) + 1
             if downbeat and bar_no <= les.bars:
                 p.setPen(qc(theme.MUTED))
                 p.drawText(QPointF(x + 4, top - 2), str(bar_no))
-            beat += 1
+            k += 1
         end = start + (BEATS_AHEAD + 1) * les.beat
         for n in les.notes:
             if n.t < start - 1e-6 or n.lane not in lane_idx:
@@ -394,7 +396,7 @@ class Highway(QWidget):
         top, bottom = self._lane_rect(0).top(), self._lane_rect(len(self.lanes) - 1).bottom()
         if s and s.started and s.in_count_in(u_now):
             # the count-in, left of the hit line: nothing has scrolled past yet, so it hides no notes
-            count = str(math.ceil((s.a - u_now) / self.lesson.beat - 1e-6))
+            count = str(math.ceil((s.a - u_now) / (self.lesson.beat * self.lesson.click_beats) - 1e-6))
             p.setPen(qc(theme.TEXT, 0.9))
             p.setFont(QFont("Segoe UI", 48, QFont.Bold))
             p.drawText(QRectF(LABEL_W, top, self._hit_x() - LABEL_W - 20, bottom - top), Qt.AlignCenter, count)

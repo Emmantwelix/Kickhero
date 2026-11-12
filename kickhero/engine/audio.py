@@ -30,6 +30,9 @@ def _pick_device():
     return None
 
 
+CLICK_BOOST = 1.6  # the click is a thin, short sound: lift it so 100% sits above a loud song
+
+
 class AudioEngine:
     def __init__(self, kit="classic", custom_sounds=None):
         self.kit = kit
@@ -152,7 +155,7 @@ class AudioEngine:
             if self.metronome:
                 for u, accent in s.beats_between(u0, u1):
                     voices.append([self.bank.clicks[accent], -int((u - u0) / span * frames),
-                                   self.volume["metronome"]])
+                                   self.volume["metronome"] * CLICK_BOOST])
             for u, i, n, p in s.notes_between(u0, u1):
                 if (self.guide_all or n.lane not in s.lanes) and n.lane not in self.muted:
                     sound = OPEN_HAT if n.open else n.lane

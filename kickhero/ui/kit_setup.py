@@ -195,15 +195,18 @@ class KitPage(QWidget):
         cl.addWidget(QLabel("Turn this on if your kit makes no sound of its own, or you're listening through the "
                             "computer.", objectName="caption", wordWrap=True))
         vol = QGridLayout()
-        for r, (key, text) in enumerate((("metronome", "Metronome"), ("pads", "Drum sounds"),
+        self.vol_sliders = {}
+        for r, (key, text) in enumerate((("backing", "Song"), ("metronome", "Metronome"), ("pads", "Drum sounds"),
                                          ("guide", "\"Hear the part\" playback"))):
             s = QSlider(Qt.Horizontal)
             s.setRange(0, 100)
-            s.setValue(int(ctx.settings[f"volume_{key}"] * 100))
+            s.setValue(round(ctx.settings[f"volume_{key}"] * 100))
             s.valueChanged.connect(lambda v, k=key: ctx.set_volume(k, v / 100))
             vol.addWidget(QLabel(text), r, 0)
             vol.addWidget(s, r, 1)
+            self.vol_sliders[key] = s
         cl.addLayout(vol)
+        ctx.volume_changed.connect(self._show_volume)
         lay.addWidget(c)
 
         # --- drum sounds ---
@@ -263,6 +266,14 @@ class KitPage(QWidget):
         self.cal_timer.timeout.connect(self._calibration_tick)
 
     # ---------- connection ----------
+
+    def _show_volume(self, key, value):
+        """Follow a volume changed elsewhere (the practice screen's Sound menu)."""
+        s = self.vol_sliders.get(key)
+        if s and s.value() != round(value * 100):
+            s.blockSignals(True)
+            s.setValue(round(value * 100))
+            s.blockSignals(False)
 
     def _ports_changed(self, ports):
         self.devices.clear()
@@ -488,7 +499,7 @@ class KitPage(QWidget):
         self.ctx.audio.metronome = cal["metronome"]
         self.cal = None
         self.cal_btn.setEnabled(True)
-        clicks = [cal["start"] + s.count_in + k * lesson.beat for k in range(CAL_BARS * lesson.beats_per_bar)]
+        clicks = [cal["start"] + s.count_in + k * lesson.beat for k in range(round(CAL_BARS * lesson.beats_per_bar))]
         result = measure_latency(clicks, cal["hits"])
         if result is None:
             self.cal_text.setText("Not enough hits were heard. Check the kit is connected (a tile lights up when "

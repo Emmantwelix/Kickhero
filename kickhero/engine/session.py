@@ -114,7 +114,7 @@ class Session:
 
     def beats_between(self, u0, u1):
         """Yield (u, is_downbeat) for every metronome beat with u0 <= u < u1, count-in included."""
-        beat, bpb = self.lesson.beat, self.lesson.beats_per_bar
+        beat, bpb = self.lesson.beat * self.lesson.click_beats, self.lesson.clicks_per_bar
         start = self.a - self.count_in
         end = math.inf if self.looping else self.b
         k = math.ceil((max(u0, start) - self.a) / beat - 1e-9)

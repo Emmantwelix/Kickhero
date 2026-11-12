@@ -1,6 +1,7 @@
 """The built-in course: lessons written as drum patterns in course/*.json, turned into practice lessons.
 
-Pattern notation (one string per lane): 16 characters per bar, one per 16th note.
+Pattern notation (one string per lane): one character per 16th note, so 16 per bar in 4/4, 12 in 3/4 and
+6/8, 24 in 12/8 (a lesson's "meter", or its unit's, sets the time signature; 4/4 if neither does).
 x = hit, X = accent, g = ghost note, o = open hi-hat (hi-hat lane only), . = rest, | separates bars.
 """
 
@@ -9,9 +10,9 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..engine.lesson import from_notes
+from ..engine.meter import meter_beats, parse_meter
 from ..lanes import LANES
 
-STEPS_PER_BAR = 16
 VELOCITY = {"x": 100, "X": 124, "g": 45, "o": 100}
 OPEN = "o"
 PASS_SPEED = 0.999   # a lesson counts as passed with 1+ star at 100% speed
@@ -28,6 +29,11 @@ class CourseLesson:
     tip: str = ""
     unit: str = ""
     number: str = ""  # e.g. "2.3"
+    meter: str = "4/4"
+
+    @property
+    def steps_per_bar(self):
+        return round(meter_beats(self.meter) * 4)
 
     @property
     def key(self):
@@ -44,6 +50,7 @@ class CourseLesson:
         """Build the playable lesson: the pattern repeated `repeats` times."""
         bar_count = max(len(p.split("|")) for p in self.pattern.values())
         step = 60.0 / self.bpm / 4
+        steps = self.steps_per_bar
         notes = []
         for lane, pattern in self.pattern.items():
             bars = pattern.split("|")
@@ -52,9 +59,10 @@ class CourseLesson:
                     cells = bars[b % len(bars)]  # shorter patterns repeat
                     for i, ch in enumerate(cells):
                         if ch in VELOCITY:
-                            t = ((rep * bar_count + b) * STEPS_PER_BAR + i) * step
+                            t = ((rep * bar_count + b) * steps + i) * step
                             notes.append((t, lane, VELOCITY[ch], ch == OPEN))
-        return from_notes(f"{self.number}  {self.title}", self.bpm, notes, bars=bar_count * self.repeats)
+        return from_notes(f"{self.number}  {self.title}", self.bpm, notes, bars=bar_count * self.repeats,
+                          meter=self.meter)
 
 
 @dataclass
@@ -70,7 +78,7 @@ def load_course(path=COURSE_FILE):
     for u, unit in enumerate(data["units"], 1):
         lessons = [CourseLesson(id=les["id"], title=les["title"], bpm=les["bpm"], pattern=les["pattern"],
                                 repeats=les.get("repeats", 4), tip=les.get("tip", ""), unit=unit["title"],
-                                number=f"{u}.{i}")
+                                number=f"{u}.{i}", meter=parse_meter(les.get("meter") or unit.get("meter")))
                    for i, les in enumerate(unit["lessons"], 1)]
         units.append(Unit(unit["title"], unit.get("about", ""), lessons))
     return units
@@ -111,7 +119,10 @@ def validate(units):
                 if lane not in LANES:
                     problems.append(f"{les.number}: unknown lane {lane}")
                 for bar in pattern.split("|"):
-                    if len(bar) != STEPS_PER_BAR or set(bar) - set(VELOCITY) - {"."}:
+                    if len(bar) != les.steps_per_bar:
+                        problems.append(f"{les.number} {lane}: bar {bar!r} has {len(bar)} steps, but a bar of "
+                                        f"{les.meter} has {les.steps_per_bar} (one per 16th note)")
+                    elif set(bar) - set(VELOCITY) - {"."}:
                         problems.append(f"{les.number} {lane}: bad bar {bar!r}")
                     elif OPEN in bar and lane != "hihat":
                         problems.append(f"{les.number} {lane}: only the hi-hat can be open")

@@ -43,10 +43,15 @@ def _metal(n, sr, freqs):
 
 
 def click(sr, accent):
-    n = int(0.03 * sr)
+    """A bright tick (tone plus octave, a short noise transient, longer ring) so it cuts through a song."""
+    n = int(0.06 * sr)
     t = np.arange(n) / sr
-    tone = np.sin(2 * np.pi * (1600 if accent else 1000) * t)
-    return (tone * _env(n, sr, 0.006) * (0.9 if accent else 0.6)).astype(np.float32)
+    f = 1600 if accent else 1000
+    x = (np.sin(2 * np.pi * f * t) + 0.4 * np.sin(2 * np.pi * 2 * f * t)) / 1.2
+    k = int(0.0015 * sr)
+    x[:k] += 0.3 * _highpass(_noise(k, 7), 0.5)
+    x = x * _env(n, sr, 0.015) * (1.0 if accent else 0.75)
+    return np.clip(x, -1, 1).astype(np.float32)
 
 
 def _classic(lane, sr):

@@ -13,7 +13,8 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 
 from ..lanes import LANE_TO_NOTE, LANES, NOTE_TO_LANE, OPEN_HAT_NOTES
-from .lesson import MERGE_S, from_notes, merge_hits, read_metadata
+from .lesson import MERGE_S, from_notes, merge_hits, meter_of, read_metadata
+from .meter import add_time_signature, meter_beats, parse_meter
 
 VELOCITY = {"accent": 124, "normal": 100, "ghost": 45}  # same as the course's X / x / g
 NOTE_LEN = 0.05      # MIDI note length, as written by the converter
@@ -50,8 +51,9 @@ def is_backup(path):
 
 
 class Part:
-    def __init__(self, path, notes, bpm, shift=0.0, title="", backing=None):
+    def __init__(self, path, notes, bpm, shift=0.0, title="", backing=None, meter="4/4"):
         self.path = Path(path)
+        self.meter = parse_meter(meter)
         self.notes = sorted(notes, key=lambda n: (n.t, LANES.index(n.lane)))
         self.bpm = float(bpm)
         self.shift = float(shift)
@@ -68,8 +70,12 @@ class Part:
         return 60.0 / self.bpm
 
     @property
+    def beats_per_bar(self):
+        return meter_beats(self.meter)
+
+    @property
     def bar(self):
-        return 4 * self.beat
+        return self.beats_per_bar * self.beat
 
     @property
     def bars(self):
@@ -81,7 +87,7 @@ class Part:
         """Round t to the nearest 1/grid note (grid 16 = sixteenths; 0 = no snapping)."""
         if not grid:
             return t
-        step = self.bar / grid
+        step = 4 * self.beat / grid
         return round(t / step) * step
 
     @property
@@ -91,7 +97,7 @@ class Part:
     # ---------- undo ----------
 
     def _push(self):
-        self._undo.append((list(self.notes), self.bpm, self.shift))
+        self._undo.append((list(self.notes), self.bpm, self.shift, self.meter))
         del self._undo[:-UNDO_LIMIT]
         self._redo.clear()
         self.dirty = True
@@ -107,15 +113,15 @@ class Part:
 
     def undo(self):
         if self._undo:
-            self._redo.append((list(self.notes), self.bpm, self.shift))
-            notes, self.bpm, self.shift = self._undo.pop()
+            self._redo.append((list(self.notes), self.bpm, self.shift, self.meter))
+            notes, self.bpm, self.shift, self.meter = self._undo.pop()
             self._set(notes)
             self.dirty = True
 
     def redo(self):
         if self._redo:
-            self._undo.append((list(self.notes), self.bpm, self.shift))
-            notes, self.bpm, self.shift = self._redo.pop()
+            self._undo.append((list(self.notes), self.bpm, self.shift, self.meter))
+            notes, self.bpm, self.shift, self.meter = self._redo.pop()
             self._set(notes)
             self.dirty = True
 
@@ -202,6 +208,13 @@ class Part:
             self._push()
             self.bpm = float(bpm)
 
+    def set_meter(self, meter):
+        """Change the time signature. Notes keep their times; the bar lines move."""
+        meter = parse_meter(meter, self.meter)
+        if meter != self.meter:
+            self._push()
+            self.meter = meter
+
     def shift_all(self, dt):
         """Move the whole part (and its alignment with the song audio, so they stay in sync).
         Notes moved before bar 1 are dropped."""
@@ -220,7 +233,8 @@ class Part:
 
     def to_lesson(self):
         return from_notes(self.title, self.bpm, [(n.t, n.lane, n.velocity, n.open) for n in self.notes],
-                          source=self.path, backing=self.backing, backing_offset=self.backing_offset)
+                          source=self.path, backing=self.backing, backing_offset=self.backing_offset,
+                          meter=self.meter)
 
     def has_backup(self):
         return backup_path(self.path).exists()
@@ -240,9 +254,10 @@ class Part:
             drums.notes.append(pretty_midi.Note(velocity=int(n.velocity), pitch=n.midi_pitch(),
                                                 start=float(n.t), end=float(n.t) + NOTE_LEN))
         midi.instruments.append(drums)
+        add_time_signature(midi, self.meter)
         midi.write(str(self.path))
         meta = read_metadata(self.path)
-        meta.update(bpm=round(self.bpm, 3), shift=self.shift,
+        meta.update(bpm=round(self.bpm, 3), shift=self.shift, meter=self.meter,
                     edited=datetime.datetime.now().isoformat(timespec="seconds"))
         self.path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
         self.dirty = False
@@ -274,4 +289,4 @@ def load_part(midi_path):
     backing = path.parent / meta["backing"] if meta.get("backing") else None
     title = meta.get("title") or path.stem.removesuffix("_drums")
     return Part(path, notes, bpm, float(meta.get("shift") or 0.0), title,
-                backing if backing and backing.exists() else None)
+                backing if backing and backing.exists() else None, meter=meter_of(pm, meta))

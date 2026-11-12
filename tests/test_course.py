@@ -7,7 +7,7 @@ from kickhero.progress import Progress
 def test_course_data_is_valid():
     units = load_course()
     assert validate(units) == []
-    assert len(units) == 9 and len(all_lessons(units)) >= 25
+    assert len(units) == 10 and len(all_lessons(units)) >= 25
 
 
 def test_every_lesson_builds_and_fits_its_bars():

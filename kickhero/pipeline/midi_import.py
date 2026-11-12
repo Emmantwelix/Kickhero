@@ -17,6 +17,7 @@ from pathlib import Path
 import numpy as np
 
 from ..engine.editing import backup_path
+from ..engine.meter import add_time_signature, meter_beats, parse_meter
 from ..lanes import HIHAT_PEDAL, NOTE_TO_LANE
 
 NOTE_LEN = 0.05
@@ -63,8 +64,8 @@ def unwrap_rmid(data):
 
 def read_drums(path):
     """The drum notes of a MIDI file. Returns (notes, info): notes are (seconds, beats, pitch, velocity)
-    tuples (beats in quarter notes from the start of the file); info has the main tempo and whether the
-    tempo changes. Hi-hat pedal notes are left out (they're the foot, under a ride or crash pattern)."""
+    tuples (beats in quarter notes from the start of the file); info has the main tempo, whether the
+    tempo changes and the time signature (None if the file has none). Hi-hat pedal notes are left out (they're the foot, under a ride or crash pattern)."""
     import pretty_midi
 
     try:
@@ -86,10 +87,12 @@ def read_drums(path):
     held = np.diff(np.append(times, end))
     main = float(tempi[int(np.argmax(held))])  # the tempo the song spends the most time at
     changes = bool(np.any(np.abs(tempi / main - 1) > 0.005))
-    return notes, {"bpm": main, "tempo_changes": changes}
+    ts = pm.time_signature_changes
+    meter = parse_meter(f"{ts[0].numerator}/{ts[0].denominator}") if ts else None
+    return notes, {"bpm": main, "tempo_changes": changes, "meter": meter}
 
 
-def write_song(folder, name, notes, bpm, shift=0.0, backing=None, **info):
+def write_song(folder, name, notes, bpm, shift=0.0, backing=None, meter="4/4", **info):
     """Write <folder>/<name>_drums.mid (one drum track) and its sidecar .json; returns the MIDI path.
     notes are (seconds from bar 1, pitch, velocity)."""
     import pretty_midi
@@ -103,8 +106,10 @@ def write_song(folder, name, notes, bpm, shift=0.0, backing=None, **info):
         drums.notes.append(pretty_midi.Note(velocity=int(vel), pitch=int(pitch), start=float(t),
                                             end=float(t) + NOTE_LEN))
     midi.instruments.append(drums)
+    meter = parse_meter(meter)
+    add_time_signature(midi, meter)
     midi.write(str(midi_path))
-    meta = dict(title=name, bpm=round(float(bpm), 3), shift=float(shift), backing=backing, **info)
+    meta = dict(title=name, bpm=round(float(bpm), 3), shift=float(shift), backing=backing, meter=meter, **info)
     meta["created"] = datetime.datetime.now().isoformat(timespec="seconds")
     midi_path.with_suffix(".json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
     old = backup_path(midi_path)  # the editor's copy of a part this one replaces: "Revert" would bring it back
@@ -123,11 +128,12 @@ def import_midi(midi_path, library, name=None):
     notes, info = read_drums(midi_path)
     name = name or song_name(midi_path)
     beat = 60.0 / info["bpm"]
+    meter = info["meter"] or "4/4"
     first = min(n[1] for n in notes) * beat
-    move = bar_trim(first, 4 * beat)
+    move = bar_trim(first, meter_beats(meter) * beat)
     out = [(b * beat + move, pitch, vel) for _, b, pitch, vel in notes]
-    return write_song(Path(library) / name, name, out, info["bpm"], source=str(Path(midi_path).resolve()),
-                      imported="midi")
+    return write_song(Path(library) / name, name, out, info["bpm"], meter=meter,
+                      source=str(Path(midi_path).resolve()), imported="midi")
 
 
 # ---------- lining up with a recording ----------
@@ -324,9 +330,9 @@ def intro_shift(origin, earliest, bar):
     return -origin + math.ceil((origin - earliest) / bar - 1e-3) * bar
 
 
-def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None):
+def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None, meter=None):
     """Write the MIDI's drum part lined up with a recording whose drum stem is drums_wav (and drumless
-    mix `backing`, a file name in `folder`). Returns (MIDI path, (match rate, match rate a beat off,
+    mix `backing`, a file name in `folder`). The time signature is `meter` if given, else the file's. Returns (MIDI path, (match rate, match rate a beat off,
     sound check or None))."""
     notes, info = read_drums(midi_path)
     times, weights, length, tilt = drum_hits(drums_wav)
@@ -334,9 +340,10 @@ def import_aligned(midi_path, drums_wav, folder, name, backing=None, source=None
         raise MidiImportError("Hardly any drums can be heard in this recording, so the MIDI can't be lined up.")
     t, bpm, origin, _, (rate, off) = align(notes, info, times, weights, length)
     sound = sound_check(t, [NOTE_TO_LANE[n[2]] for n in notes], times, tilt, 60.0 / bpm)
-    shift = intro_shift(origin, min(0.0, float(t.min())), 240.0 / bpm)
+    meter = meter or info["meter"] or "4/4"
+    shift = intro_shift(origin, min(0.0, float(t.min())), meter_beats(meter) * 60.0 / bpm)
     out = [(float(ti) + shift, pitch, vel) for ti, (_, _, pitch, vel) in zip(t, notes)]
-    path = write_song(folder, name, out, bpm, shift=shift, backing=backing, source=source,
+    path = write_song(folder, name, out, bpm, shift=shift, backing=backing, source=source, meter=meter,
                       midi_source=str(Path(midi_path).resolve()), imported="midi", match=round(rate, 3),
                       match_beat_off=round(off, 3), fit=fit_verdict(rate, off, sound),
                       **({"sound": round(sound[0], 2), "sound_beat_off": round(sound[1], 2)} if sound else {}))

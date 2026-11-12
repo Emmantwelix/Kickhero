@@ -32,6 +32,8 @@ def build_args(songs, output, options):
         args += ["--" + key.replace("_", "-"), f"{float(o[key]):g}"]
     if o.get("bpm"):  # chosen per batch, never stored in the settings
         args += ["--bpm", f"{float(o['bpm']):g}"]
+    if o.get("meter") and o["meter"] != "4/4":  # chosen per batch too
+        args += ["--meter", str(o["meter"])]
     if o["quantize"]:
         args += ["--quantize", str(int(o["quantize"]))]
     if not o["align"]:

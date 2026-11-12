@@ -1,6 +1,6 @@
 {
   "title": "Beginner course",
-  "notation": "Each bar is 16 characters, one per 16th note (4 per beat). x = hit, X = accent, g = ghost note (soft), . = rest. Separate bars with |. A lane's pattern repeats if it is shorter than the others.",
+  "notation": "One character per 16th note (4 per beat): 16 per bar in 4/4, 12 in 3/4 and 6/8, 20 in 5/4, 24 in 12/8. A lesson's (or unit's) \"meter\" sets the time signature, 4/4 if not given. x = hit, X = accent, g = ghost note (soft), . = rest. Separate bars with |. A lane's pattern repeats if it is shorter than the others.",
   "units": [
     {
       "title": "1. Keeping time",
@@ -169,6 +169,26 @@
         {"id": "open-disco", "title": "Disco beat", "bpm": 100, "repeats": 6,
          "tip": "Foot down on every beat, open on every \"and\". The hi-hat should sound like \"tss-chick\".",
          "pattern": {"hihat": "x.o.x.o.x.o.x.o.", "snare": "....x.......x...", "kick": "x...x...x...x..."}}
+      ]
+    },
+    {
+      "title": "10. Beyond 4/4",
+      "about": "Not every song counts to four. Count out loud with the click: \"1 2 3\" in 3/4, and in 6/8 and 12/8 the click comes every three eighth notes, so count \"1 2 3 4 5 6\" with the click on 1 and 4.",
+      "lessons": [
+        {"id": "odd-waltz", "title": "Waltz beat in 3/4", "meter": "3/4", "bpm": 90, "repeats": 4,
+         "tip": "Kick on 1, snare on 2 and 3: \"boom chick chick\". The click is louder on beat 1.",
+         "pattern": {"hihat": "x...x...x...", "snare": "....x...x...", "kick": "x..........."}},
+        {"id": "odd-68", "title": "Rolling groove in 6/8", "meter": "6/8", "bpm": 90, "repeats": 4,
+         "tip": "Six even hi-hats a bar. The kick is on 1 and the snare on 4, right on the second click.",
+         "pattern": {"hihat": "x.x.x.x.x.x.", "snare": "......x.....", "kick": "x..........."}},
+        {"id": "odd-128", "title": "Slow blues in 12/8", "meter": "12/8", "bpm": 75, "repeats": 4,
+         "tip": "Four clicks a bar, three hi-hats to each click. Kick on clicks 1 and 3, snare on 2 and 4, like a slow 4/4.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.x.x.x.x.", "snare": "......x...........x.....",
+                     "kick": "x...........x..........."}},
+        {"id": "odd-54", "title": "Groove in 5/4", "meter": "5/4", "bpm": 90, "repeats": 4,
+         "tip": "Five beats: think of it as 3 + 2. Kick on 1 and 4, snare on 3 and 5.",
+         "pattern": {"hihat": "x.x.x.x.x.x.x.x.x.x.", "snare": "........x.......x...",
+                     "kick": "x...........x......."}}
       ]
     }
   ]

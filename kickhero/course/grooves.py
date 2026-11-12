@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from ..engine.lesson import from_notes, merge_hits
+from ..engine.meter import meter_beats  # noqa: F401 (also imported from here)
 from ..lanes import NOTE_TO_LANE, OPEN_HAT_NOTES
 
 DEFAULT_FOLDERS = [Path(r"C:\Program Files\TakefujiGrooveVault\Resources"),
@@ -61,19 +62,6 @@ def load_keymap(path):
 
 
 GM_KEYMAP = {n: (lane, n in OPEN_HAT_NOTES) for n, lane in NOTE_TO_LANE.items() if n != 44}
-
-
-def meter_beats(meter):
-    """Quarter-note beats per bar: "7/4" -> 7, "6/8" -> 3. A changing meter ("7/8,11/8") is one bar of the
-    whole cycle, so the bar lines repeat with the groove."""
-    total = 0.0
-    for part in str(meter or "4/4").split(","):
-        try:
-            num, den = part.strip().split("/")
-            total += int(num) * 4 / int(den)
-        except ValueError:
-            return 4
-    return int(total) if total == int(total) else total
 
 
 @dataclass
@@ -152,7 +140,7 @@ class GrooveLesson:
         hits = [h for h in hits if h[0] < length - 1 / 16]  # a hit on the very end is the next pass's first
         repeats = max(2, math.ceil(MIN_BARS / bars))
         notes = [((h[0] + rep * length) * beat_s, *h[1:]) for rep in range(repeats) for h in hits]
-        return from_notes(self.title, self.bpm, merge_hits(notes), bars=bars * repeats, beats_per_bar=bpb,
+        return from_notes(self.title, self.bpm, merge_hits(notes), bars=bars * repeats, meter=self.meter,
                           source=self.path)
 
 

@@ -197,28 +197,39 @@ def fit_backbeat_tempo(snare_times, snare_vels, bpm):
     return bpm
 
 
-def bar_align_shift(kicks, kick_vels, snares, snare_vels, earliest, bpm):
+def bar_align_shift(kicks, kick_vels, snares, snare_vels, earliest, bpm, meter="4/4"):
     """Seconds to add to every note so beat 1 lands on a bar line, leaving whole bars in front
-    for any pickup notes. Beat 1 is the quarter-note position that best puts the kicks on 1 and 3
-    and the snares on 2 and 4, on the 16th grid that best fits the kick and snare hits."""
+    for any pickup notes. In 4/4, beat 1 is the quarter-note position that best puts the kicks on 1 and 3
+    and the snares on 2 and 4, on the 16th grid that best fits the kick and snare hits. In other meters
+    it's the 16th with the strongest kicks and the snares on the counted beats after it (2 and 3 in 3/4,
+    the second dotted quarter in 6/8)."""
+    from ..engine.meter import meter_beats, pulse
+
     beat = 60.0 / bpm
-    step, bar = beat / 4, beat * 4
+    n = max(1, round(meter_beats(meter) * 4))  # sixteenths per bar
+    step, bar = beat / 4, n * beat / 4
     grid_times = np.concatenate([kicks, snares])
     phase = np.angle(np.mean(np.exp(2j * np.pi * grid_times / step))) / (2 * np.pi) * step
 
-    def weight_per_16th(times, vels):  # velocity landing on each of the 16 sixteenths of a bar
-        w = np.zeros(16)
+    def weight_per_16th(times, vels):  # velocity landing on each of the n sixteenths of a bar
+        w = np.zeros(n)
         # cubed velocity, so loud backbeat hits outweigh many ghost notes
-        np.add.at(w, np.round((np.asarray(times) - phase) / step).astype(int) % 16, (np.asarray(vels) / 127) ** 3)
+        np.add.at(w, np.round((np.asarray(times) - phase) / step).astype(int) % n, (np.asarray(vels) / 127) ** 3)
         return w
 
     kw, sw = weight_per_16th(kicks, kick_vels), weight_per_16th(snares, snare_vels)
-    # Beat 1 is the sixteenth r with kicks on r and r+8 (beats 1, 3), snares on r+4 and r+12 (2, 4).
-    # The 1.01 prefers the bar that starts with a kick when beats 1 and 3 tie.
-    score = [kw[r] * 1.01 + kw[(r + 8) % 16] + sw[(r + 4) % 16] + sw[(r + 12) % 16] for r in range(16)]
+    if n == 16:
+        # Beat 1 is the sixteenth r with kicks on r and r+8 (beats 1, 3), snares on r+4 and r+12 (2, 4).
+        # The 1.01 prefers the bar that starts with a kick when beats 1 and 3 tie.
+        score = [kw[r] * 1.01 + kw[(r + 8) % 16] + sw[(r + 4) % 16] + sw[(r + 12) % 16] for r in range(16)]
+    else:
+        click = pulse(meter)[0] * 4  # sixteenths between counted beats
+        counted = [round(k * click) for k in range(1, int(n / click + 1e-6))]
+        backbeat = (lambda r: sum(sw[(r + c) % n] for c in counted) / len(counted)) if counted else (lambda r: 0)
+        score = [kw[r] * 1.5 - sw[r] * 0.5 + backbeat(r) for r in range(n)]
     r = int(np.argmax(score))
     first = phase + np.round((grid_times.min() - phase) / step) * step
-    origin = first + ((r - np.round((first - phase) / step)) % 16) * step  # first beat 1 at/after `first`
+    origin = first + ((r - np.round((first - phase) / step)) % n) * step  # first beat 1 at/after `first`
     lead = np.ceil(max(0.0, origin - earliest - step / 2) / bar) * bar
     return lead - origin
 
@@ -246,6 +257,7 @@ def main(argv=None):
                         "louder (snare/kick bleed). 0 = off. Default 10")
     p.add_argument("--no-align", action="store_true",
                    help="Keep the original timing instead of moving beat 1 onto a bar line")
+    p.add_argument("--meter", default="4/4", help="Time signature, e.g. 3/4 or 6/8 (default 4/4)")
     p.add_argument("--fit-tempo", action="store_true",
                    help="Treat --bpm as an estimate: halve/double it so the snare backbeat falls on 2 and 4")
     p.add_argument("--split-toms", action="store_true",
@@ -318,7 +330,7 @@ def main(argv=None):
 
     kicks = [(n.start, n.velocity) for n in drums.notes if n.pitch == 36]
     snares = [(n.start, n.velocity) for n in drums.notes if n.pitch == 38]
-    if args.fit_tempo and snares:
+    if args.fit_tempo and snares and args.meter == "4/4":  # the backbeat check only knows 4/4
         bpm = fit_backbeat_tempo(*zip(*snares), args.bpm)
         if bpm != args.bpm:
             print(f"  tempo: using {bpm:.1f} BPM (the snare backbeat shows {args.bpm:.1f} was double-time)")
@@ -331,7 +343,7 @@ def main(argv=None):
         kt, kv = zip(*kicks) if kicks else ((), ())
         st, sv = zip(*snares) if snares else ((), ())
         earliest = min(n.start for n in drums.notes)
-        shift = bar_align_shift(np.array(kt), kv, np.array(st), sv, earliest, args.bpm)
+        shift = bar_align_shift(np.array(kt), kv, np.array(st), sv, earliest, args.bpm, args.meter)
         for n in drums.notes:
             n.start += shift
             n.end += shift
@@ -344,6 +356,9 @@ def main(argv=None):
 
     drums.notes.sort(key=lambda n: (n.start, n.pitch))
     midi.instruments.append(drums)
+    from ..engine.meter import add_time_signature
+
+    add_time_signature(midi, args.meter)
     midi.write(args.output)
     print(f"\nWrote {len(drums.notes)} notes to {args.output}")
     return {"bpm": args.bpm, "shift": float(shift), "notes": len(drums.notes)}

@@ -63,6 +63,7 @@ class Song:
     title: str
     bpm: float
     length: float
+    meter: str
     rating: Rating
     notes: int
     backing: bool
@@ -111,7 +112,7 @@ def load_songs(folder, progress):
             added = f.stat().st_ctime
         except OSError:
             added = 0.0
-        songs.append(Song(path=f, title=lesson.title, bpm=lesson.bpm, length=lesson.length,
+        songs.append(Song(path=f, title=lesson.title, bpm=lesson.bpm, length=lesson.length, meter=lesson.meter,
                           rating=lesson.rating(), notes=len(lesson.notes), backing=bool(lesson.backing),
                           best=progress.best(f), added=added, meta=read_metadata(f)))
     return songs
@@ -238,7 +239,8 @@ class SongCard(QWidget):
         y += 44
         draw_grade(p, x, y, self.song.rating.grade)
         p.setPen(qc(theme.FAINT))
-        meta = f"{self.song.bpm:.0f} BPM · {self.song.length_text}"
+        odd = "" if self.song.meter == "4/4" else f" · {self.song.meter}"
+        meta = f"{self.song.bpm:.0f} BPM{odd} · {self.song.length_text}"
         p.drawText(QRectF(x + 24, y, tw - 24, 16), Qt.AlignLeft | Qt.AlignVCenter,
                    p.fontMetrics().elidedText(meta, Qt.ElideRight, tw - 24))
         p.end()
@@ -336,7 +338,7 @@ class DetailPanel(QFrame):
         self.title.setText(song.song)
         self.artist.setText(song.artist)
         self.artist.setVisible(bool(song.artist))
-        self.stats["tempo"].setText(f"{song.bpm:.0f} BPM")
+        self.stats["tempo"].setText(f"{song.bpm:.0f} BPM" + ("" if song.meter == "4/4" else f"  ·  {song.meter}"))
         self.stats["length"].setText(song.length_text)
         r = song.rating
         self.stats["level"].setTextFormat(Qt.RichText)
@@ -599,7 +601,7 @@ class LibraryPage(QWidget):
         menu.addAction("Edit drum part...", lambda: self.edit.emit(path))
         if source and Path(source).exists():
             menu.addAction("Convert again (fix the tempo, missing or extra notes)...",
-                           lambda: self.convert([source], detected_bpm=meta.get("bpm")))
+                           lambda: self.convert([source], detected_bpm=meta.get("bpm"), meter=meta.get("meter")))
         else:
             menu.addAction("Convert again: add the song file again (original not found)").setEnabled(False)
         menu.addAction("Show in folder", lambda: os.startfile(path.parent))
@@ -681,16 +683,17 @@ class LibraryPage(QWidget):
             self.import_midi(f)
         self.convert([u for u in urls if Path(u).suffix.lower() not in MIDI_EXTS])
 
-    def convert(self, paths, detected_bpm=None):
+    def convert(self, paths, detected_bpm=None, meter=None):
         """Ask how to convert the songs (tempo, fine-tuning), then convert them or queue them."""
         songs = song_files(p for p in paths if p)
         if not songs:
             return
-        dlg = ConvertSettingsDialog(self.ctx.settings["convert"], self, songs=songs, detected_bpm=detected_bpm)
+        dlg = ConvertSettingsDialog(self.ctx.settings["convert"], self, songs=songs, detected_bpm=detected_bpm,
+                                    meter=meter)
         if not dlg.exec():
             return
         self.ctx.settings["convert"] = dlg.result_options()
-        self._start(songs, dict(dlg.result_options(), bpm=dlg.tempo()))
+        self._start(songs, dict(dlg.result_options(), bpm=dlg.tempo(), meter=dlg.meter_choice()))
 
     def _start(self, songs, options):
         if self.job and self.job.running:

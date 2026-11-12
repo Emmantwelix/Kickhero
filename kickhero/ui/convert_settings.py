@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (QButtonGroup, QCheckBox, QComboBox, QDialog, QDou
                                QHBoxLayout, QLabel, QPushButton, QRadioButton, QScrollArea, QSlider, QVBoxLayout,
                                QWidget)
 
+from ..engine.meter import COMMON_METERS, parse_meter
 from ..pipeline.worker import DEFAULT_OPTIONS
 
 # (key, title, from, to, step, unit, explanation)
@@ -39,7 +40,7 @@ class ConvertSettingsDialog(QDialog):
     """With `songs` it asks how to convert them (tempo + options); without, it edits the saved defaults.
     `detected_bpm` (converting a song again) offers one-click fixes for the tempo found last time."""
 
-    def __init__(self, options, parent=None, songs=None, detected_bpm=None):
+    def __init__(self, options, parent=None, songs=None, detected_bpm=None, meter=None):
         super().__init__(parent)
         self.songs = list(songs or [])
         self.setWindowTitle("Convert songs" if self.songs else "Conversion settings")
@@ -56,7 +57,7 @@ class ConvertSettingsDialog(QDialog):
             if n > MAX_LISTED:
                 names.append(f"... and {n - MAX_LISTED} more")
             lay.addWidget(QLabel("\n".join(names), objectName="muted", wordWrap=True))
-            lay.addWidget(self._tempo_box(detected_bpm))
+            lay.addWidget(self._tempo_box(detected_bpm, meter))
         else:
             lay.addWidget(QLabel("How songs are turned into drum parts", objectName="h2"))
             lay.addWidget(QLabel("The defaults work for most songs. Change them if a converted song has missing or "
@@ -145,7 +146,7 @@ class ConvertSettingsDialog(QDialog):
         self.more_btn.setChecked(not self.songs)
         self._show_more(not self.songs)
 
-    def _tempo_box(self, detected_bpm):
+    def _tempo_box(self, detected_bpm, meter=None):
         box = QFrame(objectName="card")
         g = QGridLayout(box)
         g.setContentsMargins(14, 10, 14, 12)
@@ -167,6 +168,17 @@ class ConvertSettingsDialog(QDialog):
         g.addWidget(self.manual_bpm, 2, 0)
         g.addWidget(self.bpm, 2, 1)
         g.addWidget(QLabel("BPM"), 2, 2)
+        sig = QHBoxLayout()
+        sig.addWidget(QLabel("Time signature:"))
+        self.meter = QComboBox(editable=True)
+        self.meter.addItems(COMMON_METERS)
+        self.meter.setCurrentText(parse_meter(meter) if meter else "4/4")
+        self.meter.setFixedWidth(90)
+        self.meter.setToolTip("Most songs are 4/4. Pick 3/4 for a waltz, 6/8 or 12/8 for a swaying feel; "
+                              "type any other, like 7/8. It can't be detected, and can be changed later in the editor")
+        sig.addWidget(self.meter)
+        sig.addStretch()
+        g.addLayout(sig, 5, 0, 1, 4)
         if detected_bpm:
             fixes = QHBoxLayout()
             fixes.addWidget(QLabel(f"Found last time: {detected_bpm:.0f} BPM.  Try:", objectName="muted"))
@@ -211,6 +223,10 @@ class ConvertSettingsDialog(QDialog):
         for key, (s, step) in self.sliders.items():
             out[key] = round(s.value() * step, 2)
         return out
+
+    def meter_choice(self):
+        """The time signature chosen for this batch."""
+        return parse_meter(self.meter.currentText()) if self.songs else "4/4"
 
     def tempo(self):
         """The tempo chosen for this batch, or None to detect it."""

@@ -7,7 +7,7 @@ import time
 from PySide6.QtCore import QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import QActionGroup, QFont, QPainter
 from PySide6.QtWidgets import (QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QSizePolicy, QSlider,
-                               QToolButton, QVBoxLayout, QWidget)
+                               QToolButton, QVBoxLayout, QWidget, QWidgetAction)
 
 from ..engine.lesson import load_midi
 from ..engine.session import Session
@@ -70,6 +70,38 @@ def menu_button(icon_name, text, tip):
     b.setCursor(Qt.PointingHandCursor)
     b.setMenu(QMenu(b))
     return b
+
+
+def volume_slider(menu, ctx, key, text):
+    """A labelled 0-100% volume slider inside a menu, kept in step with the same setting elsewhere."""
+    w = QWidget()
+    row = QHBoxLayout(w)
+    row.setContentsMargins(12, 4, 12, 4)
+    row.setSpacing(10)
+    name = QLabel(text)
+    name.setFixedWidth(78)
+    s = QSlider(Qt.Horizontal)
+    s.setRange(0, 100)
+    s.setFixedWidth(140)
+    s.setFocusPolicy(Qt.NoFocus)  # keys stay with the practice screen (Space = kick, etc.)
+    pct = QLabel(objectName="caption")
+    pct.setFixedWidth(36)
+    row.addWidget(name)
+    row.addWidget(s)
+    row.addWidget(pct)
+
+    def show(v):
+        s.blockSignals(True)
+        s.setValue(round(v * 100))
+        s.blockSignals(False)
+        pct.setText(f"{round(v * 100)}%")
+    show(ctx.settings[f"volume_{key}"])
+    s.valueChanged.connect(lambda v: ctx.set_volume(key, v / 100))
+    ctx.volume_changed.connect(lambda k, v: k == key and show(v))
+    a = QWidgetAction(menu)
+    a.setDefaultWidget(w)
+    menu.addAction(a)
+    return a
 
 
 def setting(menu, text, tip="", checked=False):
@@ -428,6 +460,11 @@ class PracticePage(QWidget):
         self.song_btn = setting(sound, "Play along with the song", checked=True,
                                 tip="The song without its drums, so you are the drummer (100% speed only)")
         self.guide_btn = setting(sound, "Hear the drum part", tip="The app plays the drum part too, so you can hear how it goes")
+        sound.addSeparator()
+        self.song_vol = volume_slider(sound, ctx, "backing", "Song")
+        volume_slider(sound, ctx, "metronome", "Click")
+        volume_slider(sound, ctx, "guide", "Drum part")
+        volume_slider(sound, ctx, "pads", "Pad sounds")
         lay.addWidget(labelled("Sound", self.metro_btn, self.sound_btn))
         lay.addStretch(1)
 
@@ -521,7 +558,8 @@ class PracticePage(QWidget):
         self.highway.muted = self.ctx.audio.muted
         self.title.setText(self.lesson.title)
         mins, secs = divmod(int(self.lesson.length), 60)
-        self.info.setText(f"{self.lesson.bpm:.0f} BPM  ·  {mins}:{secs:02d}  ·  {self.lesson.bars} bars  ·  "
+        meter = "" if self.lesson.meter == "4/4" else f"{self.lesson.meter}  ·  "
+        self.info.setText(f"{self.lesson.bpm:.0f} BPM  ·  {meter}{mins}:{secs:02d}  ·  {self.lesson.bars} bars  ·  "
                           f"{len(self.lesson.notes)} notes")
         self.highway.set_lesson(self.lesson)
         try:
@@ -529,6 +567,9 @@ class PracticePage(QWidget):
         except Exception:
             self.ctx.audio.load_backing(None, 0)
         self.song_btn.setVisible(self.lesson.backing is not None)
+        # Hide the widget too: a hidden QWidgetAction alone leaves its slider painted over the next row
+        self.song_vol.setVisible(self.lesson.backing is not None)
+        self.song_vol.defaultWidget().setVisible(self.lesson.backing is not None)
         self._update_song_hint()
         # Course lessons rate dynamics by default; converted songs' (and grooves') dynamics are only a guide
         self.dyn_btn.setVisible(self.lesson.has_dynamics)

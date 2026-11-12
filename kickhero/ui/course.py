@@ -104,7 +104,8 @@ class LessonCard(QPushButton):
         f.setBold(False)
         p.setFont(f)
         p.setPen(qc(theme.MUTED))
-        p.drawText(QRectF(x + 24, y - 1, tw, 18), Qt.AlignLeft | Qt.AlignVCenter, f"{self.lesson.bpm:.0f} BPM")
+        p.drawText(QRectF(x + 24, y - 1, tw, 18), Qt.AlignLeft | Qt.AlignVCenter,
+                   f"{self.lesson.bpm:.0f} BPM" + ("" if self.lesson.meter == "4/4" else f"  ·  {self.lesson.meter}"))
         if self.best:
             draw_stars(p, w - 14 - 40, y + 2, self.best[0], size=12, gap=2)
         p.end()

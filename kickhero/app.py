@@ -38,6 +38,7 @@ class AppContext(QObject):
 
     lane_hit = Signal(str, int, float, object)  # lane, velocity, latency-corrected perf, hi-hat open (None = ?)
     raw_note = Signal(int, int, float, object)  # note, velocity, perf, lane ("" ignored, None unknown)
+    volume_changed = Signal(str, float)  # key (metronome, guide, pads, backing), 0..1
 
     def __init__(self):
         super().__init__()
@@ -93,6 +94,7 @@ class AppContext(QObject):
     def set_volume(self, key, value):
         self.audio.volume[key] = value
         self.settings[f"volume_{key}"] = value
+        self.volume_changed.emit(key, value)
 
     def record_result(self, lesson_path, speed, summary, assisted=False):
         if lesson_path:
