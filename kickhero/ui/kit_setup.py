@@ -483,8 +483,28 @@ class KitPage(QWidget):
                               "clicks.")
         self.cal_timer.start()
 
+    def cancel_calibration(self):
+        """Leaving the page mid-calibration: stop its clicks now, so its timer can't later switch off
+        whatever is playing by then (a practice run)."""
+        if self.cal is None:
+            return
+        self.cal_timer.stop()
+        if self.ctx.audio.session is self.cal["session"]:
+            self.ctx.audio.session = None
+            self.ctx.audio.metronome = self.cal["metronome"]
+        self.cal = None
+        self.cal_btn.setEnabled(True)
+        self.cal_text.setText("Calibration stopped (you left the page). Try again when you're ready.")
+
+    def hideEvent(self, e):
+        self.cancel_calibration()
+        super().hideEvent(e)
+
     def _calibration_tick(self):
         cal = self.cal
+        if cal is None:
+            self.cal_timer.stop()
+            return
         s = cal["session"]
         lesson = s.lesson
         end = cal["start"] + s.count_in + lesson.length + 0.4

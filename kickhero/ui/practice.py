@@ -648,7 +648,7 @@ class PracticePage(QWidget):
                 elif kind == "finished":
                     self.stop()
                     self.highway.status = ""
-                    speed, summ, assisted = self.speed, ev[1], s.wait_mode
+                    speed, summ, assisted = ev[2], ev[1], s.wait_mode  # a mid-run change counts the slowest
                     best = self._is_personal_best(speed, summ) if summ["notes"] and not assisted else False
                     if summ["notes"]:  # nothing to play (e.g. every drum turned off) isn't a result
                         self.ctx.record_result(self.key, speed, summ, assisted=assisted)

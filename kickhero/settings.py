@@ -67,8 +67,12 @@ class Settings:
         self.save()
 
     def save(self):
+        """Write a temporary file and swap it in, so a crash mid-write can't leave a half-written file
+        (which would load as defaults and lose the kit mappings and latency)."""
+        tmp = self.path.with_name(self.path.name + ".tmp")
         try:
-            self.path.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+            tmp.write_text(json.dumps(self.data, indent=2), encoding="utf-8")
+            os.replace(tmp, self.path)
         except OSError:
             pass
 

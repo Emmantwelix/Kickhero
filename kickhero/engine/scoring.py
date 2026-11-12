@@ -66,6 +66,7 @@ class PassScorer:
     def __init__(self, notes, speed=1.0, lanes=None, region=None):
         self.notes = notes
         self.speed = speed
+        self.slowest = speed  # the slowest speed any of this pass was played at (a mid-pass change)
         a, b = region if region else (float("-inf"), float("inf"))
         self.active = [i for i, n in enumerate(notes) if a <= n.t < b and (lanes is None or n.lane in lanes)]
         self.judged = {}   # note index -> Judgement

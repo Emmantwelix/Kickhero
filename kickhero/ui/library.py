@@ -1,6 +1,7 @@
 """Songs page: a grid of song cards (search, sort, filters) with a detail panel for the selected song; add songs
 (they're converted in the background) or MIDI files."""
 
+import dataclasses
 import os
 import re
 from dataclasses import dataclass, field
@@ -98,23 +99,46 @@ class Song:
         return None
 
 
+_SONG_CACHE = {}  # MIDI path -> (file stamps, Song without its best score)
+
+
+def _stamp(path):
+    try:
+        st = path.stat()
+        return st.st_mtime_ns, st.st_size
+    except OSError:
+        return None
+
+
 def load_songs(folder, progress):
-    """Every song (drum part) in the library folder, with its best score."""
+    """Every song (drum part) in the library folder, with its best score. Reading and rating a MIDI file
+    is slow (Home and Songs both list the library each time they're shown), so each song is kept until
+    its MIDI file, sidecar or backing track changes."""
     folder = Path(folder)
     files = sorted(f for f in folder.rglob("*.mid") if not is_backup(f)) if folder.is_dir() else []
     songs = []
     for f in files:
-        try:
-            lesson = load_midi(f, quantize=16)
-        except Exception:
-            continue
-        try:
-            added = f.stat().st_ctime
-        except OSError:
-            added = 0.0
-        songs.append(Song(path=f, title=lesson.title, bpm=lesson.bpm, length=lesson.length, meter=lesson.meter,
-                          rating=lesson.rating(), notes=len(lesson.notes), backing=bool(lesson.backing),
-                          best=progress.best(f), added=added, meta=read_metadata(f)))
+        meta = read_metadata(f)
+        backing = f.parent / meta["backing"] if meta.get("backing") else None
+        stamp = (_stamp(f), _stamp(f.with_suffix(".json")), _stamp(backing) if backing else None)
+        cached = _SONG_CACHE.get(f)
+        if cached and cached[0] == stamp:
+            song = cached[1]
+        else:
+            try:
+                lesson = load_midi(f, quantize=16)
+            except Exception:
+                _SONG_CACHE.pop(f, None)
+                continue
+            try:
+                added = f.stat().st_ctime
+            except OSError:
+                added = 0.0
+            song = Song(path=f, title=lesson.title, bpm=lesson.bpm, length=lesson.length, meter=lesson.meter,
+                        rating=lesson.rating(), notes=len(lesson.notes), backing=bool(lesson.backing),
+                        best=None, added=added, meta=meta)
+            _SONG_CACHE[f] = (stamp, song)
+        songs.append(dataclasses.replace(song, best=progress.best(f)))
     return songs
 
 

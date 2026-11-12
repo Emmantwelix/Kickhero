@@ -406,3 +406,25 @@ def test_every_pad_setup_step_lights_its_own_part_of_the_kit_drawing():
     parts = [step_part(i) for i in range(len(WIZARD_STEPS))]
     assert sorted(parts) == sorted(PARTS)                     # one step per part, none missing
     assert parts.index("hihat") + 1 == parts.index(OPEN_HAT) == parts.index(PEDAL) - 1
+
+
+def test_speed_change_mid_run_judges_at_the_new_speed_and_counts_the_slowest():
+    from kickhero.engine.lesson import from_notes
+    les = from_notes("s", 60, [(float(i), "snare", 100) for i in range(8)], bars=2)
+    s = Session(les, speed=0.5, count_in_bars=0)
+    s.start(0.0)
+    for i in range(4):
+        s.hit("snare", i * 2.0, 100)        # 50%: beat i at 2 s each
+    s.set_speed(1.0, 8.0)                   # now at lesson time 4.0, full speed
+    j = s.hit("snare", 8.0 + 0.10, 100)     # beat 4, 100 ms late in real time
+    assert j.grade != "extra" and j.offset == pytest.approx(0.10)
+    ev = [e for e in s.update(8.0 + 4 + 1) if e[0] == "finished"][0]
+    assert ev[2] == pytest.approx(0.5)
+
+
+def test_settings_save_replaces_the_file_whole(tmp_path):
+    from kickhero.settings import Settings
+    st = Settings(tmp_path / "settings.json")
+    st["latency_ms"] = 12.5
+    assert Settings(tmp_path / "settings.json")["latency_ms"] == 12.5
+    assert not (tmp_path / "settings.json.tmp").exists()

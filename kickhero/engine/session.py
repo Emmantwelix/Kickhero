@@ -74,10 +74,15 @@ class Session:
             return
         _, _, _, paused = self._tp
         self._tp = (now, self.u_at(now), speed, paused)  # re-anchor so the position doesn't jump
-        current = self.pass_of(self.u_at(now))
+        u = self.u_at(now)
+        current = self.pass_of(u)
+        begun = not self.in_count_in(u)
         for p, sc in self.scorers.items():
-            if p > current:
+            if p > current or (p == current and not begun):
+                sc.speed = sc.slowest = speed
+            elif p == current:  # mid-pass: judge the rest at the new speed, but the pass counts at the slowest
                 sc.speed = speed
+                sc.slowest = min(sc.slowest, speed)
 
     def _pause(self, u, now):
         start, anchor, speed, _ = self._tp
@@ -183,7 +188,7 @@ class Session:
 
     def update(self, now):
         """Advance bookkeeping. Returns events: ("miss", j), ("pass", p, summary),
-        ("finished", summary) and ("speed", new_speed)."""
+        ("finished", summary, slowest speed played) and ("speed", new_speed)."""
         if self._tp is None or self.done:
             return []
         events = []
@@ -216,7 +221,7 @@ class Session:
             events.append(("pass", q, summary))
             if not self.looping:
                 self.done = True
-                events.append(("finished", summary))
+                events.append(("finished", summary, sc.slowest))
                 break
             if self.auto_speed_up and summary["accuracy"] >= AUTO_SPEED_ACCURACY and self.speed < self.target_speed:
                 new = round(self.speed + AUTO_SPEED_STEP, 2)
